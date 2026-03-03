@@ -184,7 +184,9 @@ def _format_body_content(text_body: str, html_body: str) -> str:
     )
 
     # Prefer plain text, but fall back to HTML when plain text is empty or clearly low-value.
-    use_html = html_text and (not text_stripped or "<!--" in text_stripped or plain_is_low_value)
+    use_html = html_text and (
+        not text_stripped or "<!--" in text_stripped or plain_is_low_value
+    )
 
     if use_html:
         content = html_text
