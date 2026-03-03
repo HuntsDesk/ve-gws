@@ -34,9 +34,7 @@ def test_normalize_string_tool_output_schemas_is_targeted():
         return {"value": 1}
 
     tool_components = tool_registry.get_tool_components(server)
-    assert (
-        tool_components["text_tool"].output_schema["x-fastmcp-wrap-result"] is True
-    )
+    assert tool_components["text_tool"].output_schema["x-fastmcp-wrap-result"] is True
     assert tool_components["int_tool"].output_schema["x-fastmcp-wrap-result"] is True
     assert "x-fastmcp-wrap-result" not in tool_components["object_tool"].output_schema
 
@@ -44,9 +42,7 @@ def test_normalize_string_tool_output_schemas_is_targeted():
 
     assert cleared == 1
     assert tool_components["text_tool"].output_schema is None
-    assert (
-        tool_components["int_tool"].output_schema["x-fastmcp-wrap-result"] is True
-    )
+    assert tool_components["int_tool"].output_schema["x-fastmcp-wrap-result"] is True
     assert "x-fastmcp-wrap-result" not in tool_components["object_tool"].output_schema
 
 
