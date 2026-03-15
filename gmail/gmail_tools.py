@@ -323,6 +323,53 @@ def _extract_headers(payload: dict, header_names: List[str]) -> Dict[str, str]:
     return headers
 
 
+
+async def _fetch_thread_message_ids(service, thread_id: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Fetch Message-ID headers from a Gmail thread for reply threading.
+
+    Returns the last message's Message-ID (for In-Reply-To) and the full chain
+    of Message-IDs (for References).
+
+    Args:
+        service: Gmail API service instance
+        thread_id: Gmail thread ID
+
+    Returns:
+        Tuple of (last_message_id, references_chain) where both are strings or None
+    """
+    try:
+        thread = await asyncio.to_thread(
+            service.users().threads().get(
+                userId="me",
+                id=thread_id,
+                format="metadata",
+                metadataHeaders=["Message-ID"],
+            ).execute
+        )
+        messages = thread.get("messages", [])
+        if not messages:
+            return None, None
+
+        # Collect all Message-IDs in thread order
+        message_ids = []
+        for msg in messages:
+            headers = _extract_headers(msg.get("payload", {}), ["Message-ID"])
+            mid = headers.get("Message-ID")
+            if mid:
+                message_ids.append(mid)
+
+        if not message_ids:
+            return None, None
+
+        last_message_id = message_ids[-1]
+        references_chain = " ".join(message_ids)
+        return last_message_id, references_chain
+    except Exception as e:
+        logger.warning(f"Failed to fetch thread Message-IDs for thread {thread_id}: {e}")
+        return None, None
+
+
 def _prepare_gmail_message(
     subject: str,
     body: str,
@@ -1483,6 +1530,17 @@ async def draft_gmail_message(
             service, from_email=sender_email
         )
         draft_body = _append_signature_to_body(draft_body, body_format, signature_html)
+
+    # Auto-populate In-Reply-To and References when thread_id is provided
+    # but headers are missing, to ensure the draft renders inline in Gmail
+    if thread_id and (not in_reply_to or not references):
+        fetched_reply_to, fetched_references = await _fetch_thread_message_ids(
+            service, thread_id
+        )
+        if not in_reply_to and fetched_reply_to:
+            in_reply_to = fetched_reply_to
+        if not references and fetched_references:
+            references = fetched_references
 
     raw_message, thread_id_final, attached_count = _prepare_gmail_message(
         subject=subject,
