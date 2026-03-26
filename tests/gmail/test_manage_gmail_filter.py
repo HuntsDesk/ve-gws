@@ -22,7 +22,9 @@ def _unwrap(tool):
 
 def _annotation_adapter(param_name: str) -> TypeAdapter:
     """Match the Pydantic validation path used for annotated tool params."""
-    annotation = inspect.signature(manage_gmail_filter).parameters[param_name].annotation
+    annotation = (
+        inspect.signature(manage_gmail_filter).parameters[param_name].annotation
+    )
     return TypeAdapter(annotation)
 
 
