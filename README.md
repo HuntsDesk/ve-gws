@@ -620,6 +620,10 @@ Tokens are stored encrypted at `~/.workspace-mcp/cli-tokens/` using a Fernet key
 ```bash
 uv run workspace-cli list
 uv run workspace-cli --url https://custom.server/mcp list
+
+# Or, if installed globally:
+workspace-cli list
+workspace-cli --url https://custom.server/mcp list
 ```
 <sub>View all available tools</sub>
 

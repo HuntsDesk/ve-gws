@@ -18,6 +18,7 @@ import logging
 import os
 import stat
 import sys
+from typing import Any
 
 from cryptography.fernet import Fernet
 from fastmcp import Client
@@ -41,17 +42,17 @@ def _get_token_storage() -> FernetEncryptionWrapper:
     """
     os.makedirs(TOKEN_DIR, exist_ok=True)
 
-    if os.path.exists(KEY_PATH):
+    try:
+        fd = os.open(KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
         with open(KEY_PATH, "rb") as fh:
             key = fh.read()
     else:
         key = Fernet.generate_key()
-        fd = os.open(KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, key)
         finally:
             os.close(fd)
-        # Belt-and-suspenders: enforce permissions even if umask was lax
         os.chmod(KEY_PATH, stat.S_IRUSR | stat.S_IWUSR)
 
     return FernetEncryptionWrapper(
@@ -68,23 +69,37 @@ def _build_oauth() -> OAuth:
 
 async def _list_tools(url: str) -> None:
     """Connect, authenticate once, and print available tools."""
-    async with Client(url, auth=_build_oauth()) as client:
-        tools = await client.list_tools()
-        for tool in tools:
-            desc = (tool.description or "").split("\n")[0]
-            print(f"  {tool.name:40s} {desc}")
-        print(f"\n{len(tools)} tools available")
+    try:
+        auth = _build_oauth()
+    except Exception as e:
+        print(
+            f"Error: failed to initialize OAuth ({type(e).__name__})", file=sys.stderr
+        )
+        sys.exit(1)
+    try:
+        async with Client(url, auth=auth) as client:
+            tools = await client.list_tools()
+    except Exception as e:
+        print(f"Error: failed to list tools ({type(e).__name__})", file=sys.stderr)
+        sys.exit(1)
+    for tool in tools:
+        desc = (tool.description or "").split("\n")[0]
+        print(f"  {tool.name:40s} {desc}")
+    print(f"\n{len(tools)} tools available")
 
 
 async def _call_tool(url: str, tool_name: str, raw_args: list[str]) -> None:
     """Connect, authenticate once, call a single tool, and print the result."""
-    kwargs: dict[str, str] = {}
+    kwargs: dict[str, Any] = {}
     for arg in raw_args:
         if "=" not in arg:
             print(f"Error: argument '{arg}' must be in key=value form", file=sys.stderr)
             sys.exit(1)
         k, v = arg.split("=", 1)
-        kwargs[k] = v
+        try:
+            kwargs[k] = json.loads(v)
+        except json.JSONDecodeError:
+            kwargs[k] = v
 
     async with Client(url, auth=_build_oauth()) as client:
         result = await client.call_tool(tool_name, kwargs)
