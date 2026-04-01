@@ -10,6 +10,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from fastmcp.server.dependencies import get_access_token, get_context
 from auth.google_auth import get_authenticated_google_service, GoogleAuthenticationError
+from core.config import USER_GOOGLE_EMAIL as _ENV_USER_EMAIL
 from auth.oauth21_session_store import (
     get_auth_provider,
     get_oauth21_session_store,
@@ -363,7 +364,13 @@ def _extract_oauth20_user_email(
 
     user_google_email = bound_args.arguments.get("user_google_email")
     if not user_google_email:
+        # Fall back to USER_GOOGLE_EMAIL env var for single-user / self-hosted mode.
+        # This allows callers (agents) to omit the parameter when a default is configured.
+        user_google_email = _ENV_USER_EMAIL
+    if not user_google_email:
         raise Exception("'user_google_email' parameter is required but was not found.")
+    # Ensure the resolved email is visible to the original function via kwargs
+    kwargs["user_google_email"] = user_google_email
     return user_google_email
 
 
@@ -600,7 +607,9 @@ def require_google_service(
             filtered_params = [p for p in params[1:] if p.name != "user_google_email"]
             wrapper_sig = original_sig.replace(parameters=filtered_params)
         else:
-            # Only remove 'service' parameter for OAuth 2.0 mode
+            # Only remove 'service' parameter for OAuth 2.0 mode.
+            # user_google_email stays required in the signature; call_tool() in
+            # SecureFastMCP injects the env-var default before pydantic validates.
             wrapper_sig = original_sig.replace(parameters=params[1:])
 
         @wraps(func)
