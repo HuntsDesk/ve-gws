@@ -965,15 +965,14 @@ async def _fetch_cell_formulas(
     service,
     spreadsheet_id: str,
     resolved_range: str,
-    values: List[List[object]],
-) -> str:
+) -> tuple[str, List[List[object]]]:
     """Fetch formula strings for cells in the given range.
 
     Makes a second values().get() call with valueRenderOption="FORMULA" and
     returns a formatted section listing any cells whose value starts with "=".
     Cells containing plain values are silently skipped.
 
-    Returns an empty string if no formula cells are found or the request fails.
+    Returns an empty section and empty values list if the request fails.
     """
     try:
         result = await asyncio.to_thread(
@@ -992,7 +991,7 @@ async def _fetch_cell_formulas(
             resolved_range,
             exc,
         )
-        raise exc
+        return "", []
 
     formula_values = result.get("values", [])
     formulas: list[dict[str, str]] = []
@@ -1013,7 +1012,10 @@ async def _fetch_cell_formulas(
                     cell_ref = f"{_quote_sheet_title_for_a1(sheet_name)}!{cell_ref}"
                 formulas.append({"cell": cell_ref, "formula": cell_value})
 
-    return _format_sheet_formula_section(formulas=formulas, range_label=resolved_range)
+    return (
+        _format_sheet_formula_section(formulas=formulas, range_label=resolved_range),
+        formula_values,
+    )
 
 
 def _format_sheet_formula_section(

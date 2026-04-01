@@ -210,11 +210,7 @@ async def read_sheet_values(
     )
 
     values = result.get("values", [])
-    if not values:
-        return f"No data found in range '{range_name}' for {user_google_email}."
-
     resolved_range = result.get("range", range_name)
-    detailed_range = _a1_range_for_values(resolved_range, values) or resolved_range
 
     hyperlink_section, notes_section = await _fetch_grid_metadata(
         service,
@@ -226,10 +222,27 @@ async def read_sheet_values(
     )
 
     formula_section = ""
+    formula_values = []
     if include_formulas:
-        formula_section = await _fetch_cell_formulas(
-            service, spreadsheet_id, resolved_range, values
+        formula_section, formula_values = await _fetch_cell_formulas(
+            service, spreadsheet_id, resolved_range
         )
+
+    if not values and not formula_values:
+        return f"No data found in range '{range_name}' for {user_google_email}."
+
+    if not values:
+        logger.info(
+            "[read_sheet_values] Range '%s' has formula cells but no displayed values",
+            resolved_range,
+        )
+        return (
+            f"No displayed values found in range '{range_name}' in spreadsheet {spreadsheet_id} "
+            f"for {user_google_email}. The range contains formula cells."
+            + formula_section
+        )
+
+    detailed_range = _a1_range_for_values(resolved_range, values) or resolved_range
 
     detailed_errors_section = ""
     if _values_contain_sheets_errors(values):
