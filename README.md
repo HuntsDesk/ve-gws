@@ -159,7 +159,7 @@ uv run main.py --tools gmail drive calendar
 | `OAUTHLIB_INSECURE_TRANSPORT` | **required**&ast; | Set to `1` for development — allows `http://` redirect |
 | `USER_GOOGLE_EMAIL` | | Default email for single-user auth |
 | `GOOGLE_CLIENT_SECRET_PATH` | | Custom path to `client_secret.json` |
-| `GOOGLE_MCP_CREDENTIALS_DIR` | | Credential storage directory — default `~/.google_workspace_mcp/credentials` |
+| `GOOGLE_MCP_CREDENTIALS_DIR` | | Credential directory — default `~/.google_workspace_mcp/credentials` |
 | **🖥️ Server** | | |
 | `WORKSPACE_MCP_BASE_URI` | | Base server URI (no port) — default `http://localhost` |
 | `WORKSPACE_MCP_PORT` | | Listening port — default `8000` |
