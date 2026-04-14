@@ -70,6 +70,7 @@ def organization_input(**kwargs):
 # _normalize helpers
 # =============================================================================
 
+
 class TestNormalize:
     def test_normalize_phone_strips_parens_dashes(self):
         assert _normalize_phone("+7 (927) 000-00-00") == "+79270000000"
@@ -87,6 +88,7 @@ class TestNormalize:
 # =============================================================================
 # _format_phone_line
 # =============================================================================
+
 
 class TestFormatPhoneLine:
     def test_phone_with_type(self):
@@ -114,6 +116,7 @@ class TestFormatPhoneLine:
 # _format_email_line
 # =============================================================================
 
+
 class TestFormatEmailLine:
     def test_email_with_type(self):
         email = {"value": "user@example.com", "type": "work"}
@@ -131,6 +134,7 @@ class TestFormatEmailLine:
 # =============================================================================
 # _format_contact — phones/emails multi-line display
 # =============================================================================
+
 
 class TestFormatContactPhones:
     def test_single_phone_shows_inline(self):
@@ -200,6 +204,7 @@ class TestFormatContactPhones:
 # _build_person_body — new phones/emails/organizations params
 # =============================================================================
 
+
 class TestBuildPersonBodyNew:
     def test_phones_list(self):
         body = _build_person_body(
@@ -230,7 +235,10 @@ class TestBuildPersonBodyNew:
             ]
         )
         assert len(body["emailAddresses"]) == 2
-        assert body["emailAddresses"][0] == {"value": "work@example.com", "type": "work"}
+        assert body["emailAddresses"][0] == {
+            "value": "work@example.com",
+            "type": "work",
+        }
 
     def test_organizations_list(self):
         body = _build_person_body(
@@ -356,9 +364,7 @@ class TestBuildPersonBodyNew:
 
     def test_internal_phone_no_type_default_not_added(self):
         """phones without type field do not get a default type injected."""
-        body = _build_person_body(
-            phones=[phone_input(number="+79270000000")]
-        )
+        body = _build_person_body(phones=[phone_input(number="+79270000000")])
         assert "type" not in body["phoneNumbers"][0]
 
     def test_all_new_fields_together(self):
@@ -386,6 +392,7 @@ class TestBuildPersonBodyNew:
 # =============================================================================
 # Deprecated aliases — emit DeprecationWarning, result is correct
 # =============================================================================
+
 
 class TestDeprecatedAliases:
     def test_phone_alias_emits_warning(self):
@@ -443,6 +450,7 @@ class TestDeprecatedAliases:
 # _merge_phones
 # =============================================================================
 
+
 class TestMergePhones:
     def test_merge_adds_new_phone(self):
         existing = [{"value": "+79270000000", "type": "mobile"}]
@@ -461,8 +469,16 @@ class TestMergePhones:
         assert len(result) == 1
 
     def test_merge_deduplicates_by_canonical_form(self):
-        existing = [{"value": "+79270000000", "canonicalForm": "+79270000000", "type": "mobile"}]
-        new = [{"value": "+7 927 000-00-00", "canonicalForm": "+79270000000", "type": "work"}]
+        existing = [
+            {"value": "+79270000000", "canonicalForm": "+79270000000", "type": "mobile"}
+        ]
+        new = [
+            {
+                "value": "+7 927 000-00-00",
+                "canonicalForm": "+79270000000",
+                "type": "work",
+            }
+        ]
         result = _merge_phones(existing, new, "merge")
         assert len(result) == 1
 
@@ -480,7 +496,10 @@ class TestMergePhones:
         assert len(result) == 2
 
     def test_replace_overwrites_all(self):
-        existing = [{"value": "+79270000000", "type": "mobile"}, {"value": "250", "type": "internal"}]
+        existing = [
+            {"value": "+79270000000", "type": "mobile"},
+            {"value": "250", "type": "internal"},
+        ]
         new = [{"value": "+79998887766", "type": "work"}]
         result = _merge_phones(existing, new, "replace")
         assert len(result) == 1
@@ -516,6 +535,7 @@ class TestMergePhones:
 # =============================================================================
 # _merge_emails
 # =============================================================================
+
 
 class TestMergeEmails:
     def test_merge_adds_new_email(self):
@@ -556,6 +576,7 @@ class TestMergeEmails:
 # =============================================================================
 # _merge_organizations
 # =============================================================================
+
 
 class TestMergeOrganizations:
     def test_merge_adds_new_org(self):
@@ -606,11 +627,10 @@ class TestMergeOrganizations:
 # Internal PBX type — end-to-end through build+format
 # =============================================================================
 
+
 class TestInternalATSType:
     def test_build_internal_phone(self):
-        body = _build_person_body(
-            phones=[phone_input(number="250", type="internal")]
-        )
+        body = _build_person_body(phones=[phone_input(number="250", type="internal")])
         pn = body["phoneNumbers"][0]
         assert pn["value"] == "250"
         assert pn["type"] == "internal"
@@ -652,6 +672,7 @@ class TestInternalATSType:
 # =============================================================================
 # _build_person_body — batch-compatible (notes, address in new API)
 # =============================================================================
+
 
 class TestBuildPersonBodyBatch:
     def test_notes_included_in_batch_body(self):

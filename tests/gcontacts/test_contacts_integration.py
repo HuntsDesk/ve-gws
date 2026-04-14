@@ -31,7 +31,6 @@ from gcontacts.contacts_tools import (
     manage_contacts_batch as _manage_contacts_batch_wrapped,
     _format_contact,
     _normalize_phone,
-    _build_person_body,
 )
 from core.utils import UserInputError
 
@@ -54,6 +53,7 @@ def run(coro):
 # =============================================================================
 # Test 8: manage_contact action="update" phones_mode="merge"
 # =============================================================================
+
 
 class TestManageContactUpdateMerge:
     """Integration: update with phones_mode='merge' performs read-modify-write."""
@@ -83,17 +83,23 @@ class TestManageContactUpdateMerge:
             {"value": "250", "type": "internal"},
         ]
         svc = MagicMock()
-        svc.people.return_value.get.return_value.execute.return_value = self._existing_contact()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._update_result(new_phones)
+        svc.people.return_value.get.return_value.execute.return_value = (
+            self._existing_contact()
+        )
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._update_result(new_phones)
+        )
 
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "250", "type": "internal"}],
-            phones_mode="merge",
-        ))
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "250", "type": "internal"}],
+                phones_mode="merge",
+            )
+        )
 
         update_kwargs = svc.people.return_value.updateContact.call_args.kwargs
         body = update_kwargs["body"]
@@ -106,19 +112,28 @@ class TestManageContactUpdateMerge:
 
     def test_merge_passes_updatePersonFields_phoneNumbers(self):
         """updatePersonFields must contain 'phoneNumbers' when phones updated."""
-        new_phones = [{"value": "+79270000000", "type": "mobile"}, {"value": "250", "type": "internal"}]
+        new_phones = [
+            {"value": "+79270000000", "type": "mobile"},
+            {"value": "250", "type": "internal"},
+        ]
         svc = MagicMock()
-        svc.people.return_value.get.return_value.execute.return_value = self._existing_contact()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._update_result(new_phones)
+        svc.people.return_value.get.return_value.execute.return_value = (
+            self._existing_contact()
+        )
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._update_result(new_phones)
+        )
 
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "250", "type": "internal"}],
-            phones_mode="merge",
-        ))
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "250", "type": "internal"}],
+                phones_mode="merge",
+            )
+        )
 
         update_kwargs = svc.people.return_value.updateContact.call_args.kwargs
         assert "phoneNumbers" in update_kwargs["updatePersonFields"]
@@ -126,18 +141,22 @@ class TestManageContactUpdateMerge:
     def test_merge_etag_from_current_contact_used_in_body(self):
         """etag from GET response must appear in the updateContact body."""
         svc = MagicMock()
-        svc.people.return_value.get.return_value.execute.return_value = self._existing_contact()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._update_result(
-            [{"value": "250", "type": "internal"}]
+        svc.people.return_value.get.return_value.execute.return_value = (
+            self._existing_contact()
+        )
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._update_result([{"value": "250", "type": "internal"}])
         )
 
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "250", "type": "internal"}],
-        ))
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "250", "type": "internal"}],
+            )
+        )
 
         update_kwargs = svc.people.return_value.updateContact.call_args.kwargs
         assert update_kwargs["body"]["etag"] == "E1"
@@ -146,6 +165,7 @@ class TestManageContactUpdateMerge:
 # =============================================================================
 # Test 9: phones_mode="replace" vs "merge" vs "remove" behavioural difference
 # =============================================================================
+
 
 class TestPhonesModesBehaviorDifference:
     """Verify three modes produce distinctly different outcomes."""
@@ -164,20 +184,26 @@ class TestPhonesModesBehaviorDifference:
         return {"resourceName": "people/c123", "etag": "E2", "phoneNumbers": []}
 
     def _run_update(self, svc, mode):
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "+79991112233", "type": "other"}],
-            phones_mode=mode,
-        ))
-        return svc.people.return_value.updateContact.call_args.kwargs["body"]["phoneNumbers"]
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "+79991112233", "type": "other"}],
+                phones_mode=mode,
+            )
+        )
+        return svc.people.return_value.updateContact.call_args.kwargs["body"][
+            "phoneNumbers"
+        ]
 
     def test_replace_leaves_only_new_phone(self):
         svc = MagicMock()
         svc.people.return_value.get.return_value.execute.return_value = self._existing()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._noop_result()
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._noop_result()
+        )
         result_phones = self._run_update(svc, "replace")
         assert len(result_phones) == 1
         assert result_phones[0]["value"] == "+79991112233"
@@ -185,7 +211,9 @@ class TestPhonesModesBehaviorDifference:
     def test_merge_adds_new_phone_keeping_existing(self):
         svc = MagicMock()
         svc.people.return_value.get.return_value.execute.return_value = self._existing()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._noop_result()
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._noop_result()
+        )
         result_phones = self._run_update(svc, "merge")
         values = [p["value"] for p in result_phones]
         assert len(result_phones) == 3
@@ -196,16 +224,22 @@ class TestPhonesModesBehaviorDifference:
     def test_remove_deletes_matching_phone_keeps_other(self):
         svc = MagicMock()
         svc.people.return_value.get.return_value.execute.return_value = self._existing()
-        svc.people.return_value.updateContact.return_value.execute.return_value = self._noop_result()
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "+79270000000", "type": "mobile"}],
-            phones_mode="remove",
-        ))
-        result_phones = svc.people.return_value.updateContact.call_args.kwargs["body"]["phoneNumbers"]
+        svc.people.return_value.updateContact.return_value.execute.return_value = (
+            self._noop_result()
+        )
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "+79270000000", "type": "mobile"}],
+                phones_mode="remove",
+            )
+        )
+        result_phones = svc.people.return_value.updateContact.call_args.kwargs["body"][
+            "phoneNumbers"
+        ]
         values = [p["value"] for p in result_phones]
         assert "+79270000000" not in values
         assert "+78482123456" in values
@@ -215,6 +249,7 @@ class TestPhonesModesBehaviorDifference:
 # Test 10: retry on 412 etag conflict
 # =============================================================================
 
+
 class TestEtagRetryOn412:
     """manage_contact retries update on 412 Precondition Failed and succeeds on second attempt."""
 
@@ -223,8 +258,16 @@ class TestEtagRetryOn412:
         resp_412.status = 412
         http_412 = HttpError(resp=resp_412, content=b"Precondition Failed")
 
-        first_contact = {"resourceName": "people/c123", "etag": "E_STALE", "phoneNumbers": []}
-        second_contact = {"resourceName": "people/c123", "etag": "E_FRESH", "phoneNumbers": []}
+        first_contact = {
+            "resourceName": "people/c123",
+            "etag": "E_STALE",
+            "phoneNumbers": [],
+        }
+        second_contact = {
+            "resourceName": "people/c123",
+            "etag": "E_FRESH",
+            "phoneNumbers": [],
+        }
         update_success = {
             "resourceName": "people/c123",
             "etag": "E_AFTER",
@@ -232,17 +275,25 @@ class TestEtagRetryOn412:
         }
 
         svc = MagicMock()
-        svc.people.return_value.get.return_value.execute.side_effect = [first_contact, second_contact]
-        svc.people.return_value.updateContact.return_value.execute.side_effect = [http_412, update_success]
+        svc.people.return_value.get.return_value.execute.side_effect = [
+            first_contact,
+            second_contact,
+        ]
+        svc.people.return_value.updateContact.return_value.execute.side_effect = [
+            http_412,
+            update_success,
+        ]
 
-        result = run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "+79270000000", "type": "mobile"}],
-            phones_mode="replace",
-        ))
+        result = run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "+79270000000", "type": "mobile"}],
+                phones_mode="replace",
+            )
+        )
 
         assert svc.people.return_value.updateContact.call_count == 2
         assert "Contact Updated" in result
@@ -253,8 +304,16 @@ class TestEtagRetryOn412:
         resp_412.status = 412
         http_412 = HttpError(resp=resp_412, content=b"Precondition Failed")
 
-        first_contact = {"resourceName": "people/c123", "etag": "STALE", "phoneNumbers": []}
-        second_contact = {"resourceName": "people/c123", "etag": "FRESH", "phoneNumbers": []}
+        first_contact = {
+            "resourceName": "people/c123",
+            "etag": "STALE",
+            "phoneNumbers": [],
+        }
+        second_contact = {
+            "resourceName": "people/c123",
+            "etag": "FRESH",
+            "phoneNumbers": [],
+        }
         update_success = {
             "resourceName": "people/c123",
             "etag": "AFTER",
@@ -262,19 +321,29 @@ class TestEtagRetryOn412:
         }
 
         svc = MagicMock()
-        svc.people.return_value.get.return_value.execute.side_effect = [first_contact, second_contact]
-        svc.people.return_value.updateContact.return_value.execute.side_effect = [http_412, update_success]
+        svc.people.return_value.get.return_value.execute.side_effect = [
+            first_contact,
+            second_contact,
+        ]
+        svc.people.return_value.updateContact.return_value.execute.side_effect = [
+            http_412,
+            update_success,
+        ]
 
-        run(manage_contact(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            contact_id="c123",
-            phones=[{"number": "+79270000000", "type": "mobile"}],
-            phones_mode="replace",
-        ))
+        run(
+            manage_contact(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                contact_id="c123",
+                phones=[{"number": "+79270000000", "type": "mobile"}],
+                phones_mode="replace",
+            )
+        )
 
-        second_call_body = svc.people.return_value.updateContact.call_args_list[1].kwargs["body"]
+        second_call_body = svc.people.return_value.updateContact.call_args_list[
+            1
+        ].kwargs["body"]
         assert second_call_body["etag"] == "FRESH"
 
     def test_retry_exhausted_reraises_412(self):
@@ -286,23 +355,28 @@ class TestEtagRetryOn412:
         contact = {"resourceName": "people/c123", "etag": "E1", "phoneNumbers": []}
         svc = MagicMock()
         svc.people.return_value.get.return_value.execute.return_value = contact
-        svc.people.return_value.updateContact.return_value.execute.side_effect = http_412
+        svc.people.return_value.updateContact.return_value.execute.side_effect = (
+            http_412
+        )
 
         with pytest.raises(HttpError) as exc_info:
-            run(manage_contact(
-                service=svc,
-                user_google_email="test@example.com",
-                action="update",
-                contact_id="c123",
-                phones=[{"number": "+79270000000", "type": "mobile"}],
-                phones_mode="replace",
-            ))
+            run(
+                manage_contact(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="update",
+                    contact_id="c123",
+                    phones=[{"number": "+79270000000", "type": "mobile"}],
+                    phones_mode="replace",
+                )
+            )
         assert exc_info.value.resp.status == 412
 
 
 # =============================================================================
 # Test 11: manage_contacts_batch with field="phoneNumbers"
 # =============================================================================
+
 
 class TestBatchUpdateWithFieldParam:
     """Batch update sends contacts as dict (not list) with correct updateMask."""
@@ -323,16 +397,24 @@ class TestBatchUpdateWithFieldParam:
     def test_contacts_sent_as_dict_not_list(self):
         svc = self._make_batch_service()
 
-        run(manage_contacts_batch(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            updates=[
-                {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-                {"contact_id": "c2", "phones": [{"number": "+78482123456", "type": "work"}]},
-            ],
-            field="phoneNumbers",
-        ))
+        run(
+            manage_contacts_batch(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                updates=[
+                    {
+                        "contact_id": "c1",
+                        "phones": [{"number": "+79270000000", "type": "mobile"}],
+                    },
+                    {
+                        "contact_id": "c2",
+                        "phones": [{"number": "+78482123456", "type": "work"}],
+                    },
+                ],
+                field="phoneNumbers",
+            )
+        )
 
         call_kwargs = svc.people.return_value.batchUpdateContacts.call_args.kwargs
         body = call_kwargs["body"]
@@ -342,15 +424,20 @@ class TestBatchUpdateWithFieldParam:
     def test_updateMask_matches_field_param(self):
         svc = self._make_batch_service()
 
-        run(manage_contacts_batch(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            updates=[
-                {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-            ],
-            field="phoneNumbers",
-        ))
+        run(
+            manage_contacts_batch(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                updates=[
+                    {
+                        "contact_id": "c1",
+                        "phones": [{"number": "+79270000000", "type": "mobile"}],
+                    },
+                ],
+                field="phoneNumbers",
+            )
+        )
 
         call_kwargs = svc.people.return_value.batchUpdateContacts.call_args.kwargs
         body = call_kwargs["body"]
@@ -359,16 +446,24 @@ class TestBatchUpdateWithFieldParam:
     def test_each_contact_keyed_by_resource_name(self):
         svc = self._make_batch_service()
 
-        run(manage_contacts_batch(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            updates=[
-                {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-                {"contact_id": "c2", "phones": [{"number": "+78482123456", "type": "work"}]},
-            ],
-            field="phoneNumbers",
-        ))
+        run(
+            manage_contacts_batch(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                updates=[
+                    {
+                        "contact_id": "c1",
+                        "phones": [{"number": "+79270000000", "type": "mobile"}],
+                    },
+                    {
+                        "contact_id": "c2",
+                        "phones": [{"number": "+78482123456", "type": "work"}],
+                    },
+                ],
+                field="phoneNumbers",
+            )
+        )
 
         call_kwargs = svc.people.return_value.batchUpdateContacts.call_args.kwargs
         contacts = call_kwargs["body"]["contacts"]
@@ -378,18 +473,28 @@ class TestBatchUpdateWithFieldParam:
     def test_each_contact_has_etag(self):
         svc = self._make_batch_service()
 
-        run(manage_contacts_batch(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            updates=[
-                {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-                {"contact_id": "c2", "phones": [{"number": "+78482123456", "type": "work"}]},
-            ],
-            field="phoneNumbers",
-        ))
+        run(
+            manage_contacts_batch(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                updates=[
+                    {
+                        "contact_id": "c1",
+                        "phones": [{"number": "+79270000000", "type": "mobile"}],
+                    },
+                    {
+                        "contact_id": "c2",
+                        "phones": [{"number": "+78482123456", "type": "work"}],
+                    },
+                ],
+                field="phoneNumbers",
+            )
+        )
 
-        contacts = svc.people.return_value.batchUpdateContacts.call_args.kwargs["body"]["contacts"]
+        contacts = svc.people.return_value.batchUpdateContacts.call_args.kwargs["body"][
+            "contacts"
+        ]
         assert contacts["people/c1"]["etag"] == "E1"
         assert contacts["people/c2"]["etag"] == "E2"
 
@@ -397,17 +502,24 @@ class TestBatchUpdateWithFieldParam:
         """Person body in contacts map must only contain the field key + etag."""
         svc = self._make_batch_service()
 
-        run(manage_contacts_batch(
-            service=svc,
-            user_google_email="test@example.com",
-            action="update",
-            updates=[
-                {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-            ],
-            field="phoneNumbers",
-        ))
+        run(
+            manage_contacts_batch(
+                service=svc,
+                user_google_email="test@example.com",
+                action="update",
+                updates=[
+                    {
+                        "contact_id": "c1",
+                        "phones": [{"number": "+79270000000", "type": "mobile"}],
+                    },
+                ],
+                field="phoneNumbers",
+            )
+        )
 
-        contacts = svc.people.return_value.batchUpdateContacts.call_args.kwargs["body"]["contacts"]
+        contacts = svc.people.return_value.batchUpdateContacts.call_args.kwargs["body"][
+            "contacts"
+        ]
         person = contacts["people/c1"]
         assert "phoneNumbers" in person
         assert "etag" in person
@@ -419,6 +531,7 @@ class TestBatchUpdateWithFieldParam:
 # Test 12: manage_contacts_batch without field param raises UserInputError
 # =============================================================================
 
+
 class TestBatchUpdateWithoutFieldParam:
     """Batch update without field param must raise UserInputError, not hit the API."""
 
@@ -426,15 +539,20 @@ class TestBatchUpdateWithoutFieldParam:
         svc = MagicMock()
 
         with pytest.raises(UserInputError) as exc_info:
-            run(manage_contacts_batch(
-                service=svc,
-                user_google_email="test@example.com",
-                action="update",
-                updates=[
-                    {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-                ],
-                field=None,
-            ))
+            run(
+                manage_contacts_batch(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="update",
+                    updates=[
+                        {
+                            "contact_id": "c1",
+                            "phones": [{"number": "+79270000000", "type": "mobile"}],
+                        },
+                    ],
+                    field=None,
+                )
+            )
 
         assert "field" in str(exc_info.value).lower()
         svc.people.return_value.batchUpdateContacts.assert_not_called()
@@ -443,23 +561,32 @@ class TestBatchUpdateWithoutFieldParam:
         svc = MagicMock()
 
         with pytest.raises(UserInputError) as exc_info:
-            run(manage_contacts_batch(
-                service=svc,
-                user_google_email="test@example.com",
-                action="update",
-                updates=[
-                    {"contact_id": "c1", "phones": [{"number": "+79270000000", "type": "mobile"}]},
-                ],
-                field="invalidField",
-            ))
+            run(
+                manage_contacts_batch(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="update",
+                    updates=[
+                        {
+                            "contact_id": "c1",
+                            "phones": [{"number": "+79270000000", "type": "mobile"}],
+                        },
+                    ],
+                    field="invalidField",
+                )
+            )
 
-        assert "invalidField" in str(exc_info.value) or "field" in str(exc_info.value).lower()
+        assert (
+            "invalidField" in str(exc_info.value)
+            or "field" in str(exc_info.value).lower()
+        )
         svc.people.return_value.batchUpdateContacts.assert_not_called()
 
 
 # =============================================================================
 # Test 13: Deprecated aliases via manage_contact + DeprecationWarning
 # =============================================================================
+
 
 class TestManageContactDeprecatedAliases:
     """manage_contact passes deprecated phone/email aliases through and emits DeprecationWarning."""
@@ -470,15 +597,19 @@ class TestManageContactDeprecatedAliases:
             "phoneNumbers": [{"value": "+79270000000", "type": "mobile"}],
         }
         svc = MagicMock()
-        svc.people.return_value.createContact.return_value.execute.return_value = created
+        svc.people.return_value.createContact.return_value.execute.return_value = (
+            created
+        )
 
         with pytest.warns(DeprecationWarning):
-            run(manage_contact(
-                service=svc,
-                user_google_email="test@example.com",
-                action="create",
-                phone="+79270000000",
-            ))
+            run(
+                manage_contact(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="create",
+                    phone="+79270000000",
+                )
+            )
 
         call_kwargs = svc.people.return_value.createContact.call_args.kwargs
         body = call_kwargs["body"]
@@ -491,15 +622,19 @@ class TestManageContactDeprecatedAliases:
             "emailAddresses": [{"value": "test@example.com", "type": "other"}],
         }
         svc = MagicMock()
-        svc.people.return_value.createContact.return_value.execute.return_value = created
+        svc.people.return_value.createContact.return_value.execute.return_value = (
+            created
+        )
 
         with pytest.warns(DeprecationWarning):
-            run(manage_contact(
-                service=svc,
-                user_google_email="test@example.com",
-                action="create",
-                email="test@example.com",
-            ))
+            run(
+                manage_contact(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="create",
+                    email="test@example.com",
+                )
+            )
 
         call_kwargs = svc.people.return_value.createContact.call_args.kwargs
         body = call_kwargs["body"]
@@ -511,6 +646,7 @@ class TestManageContactDeprecatedAliases:
 # Test 14: Simultaneous deprecated phone + phones — phones wins
 # =============================================================================
 
+
 class TestPhonesPriorityOverDeprecatedPhone:
     """When both phones and phone provided, phones list is used and phone alias ignored."""
 
@@ -520,17 +656,21 @@ class TestPhonesPriorityOverDeprecatedPhone:
             "phoneNumbers": [{"value": "+79270000000", "type": "mobile"}],
         }
         svc = MagicMock()
-        svc.people.return_value.createContact.return_value.execute.return_value = created
+        svc.people.return_value.createContact.return_value.execute.return_value = (
+            created
+        )
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            run(manage_contact(
-                service=svc,
-                user_google_email="test@example.com",
-                action="create",
-                phones=[{"number": "+79270000000", "type": "mobile"}],
-                phone="+70000000000",
-            ))
+            run(
+                manage_contact(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="create",
+                    phones=[{"number": "+79270000000", "type": "mobile"}],
+                    phone="+70000000000",
+                )
+            )
             assert any("ignored" in str(warning.message) for warning in w)
 
         call_kwargs = svc.people.return_value.createContact.call_args.kwargs
@@ -544,17 +684,21 @@ class TestPhonesPriorityOverDeprecatedPhone:
         """Ensure deprecated phone does not end up as extra entry alongside phones list."""
         created = {"resourceName": "people/c_new", "phoneNumbers": []}
         svc = MagicMock()
-        svc.people.return_value.createContact.return_value.execute.return_value = created
+        svc.people.return_value.createContact.return_value.execute.return_value = (
+            created
+        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
-            run(manage_contact(
-                service=svc,
-                user_google_email="test@example.com",
-                action="create",
-                phones=[{"number": "+79270000000", "type": "mobile"}],
-                phone="+70000000000",
-            ))
+            run(
+                manage_contact(
+                    service=svc,
+                    user_google_email="test@example.com",
+                    action="create",
+                    phones=[{"number": "+79270000000", "type": "mobile"}],
+                    phone="+70000000000",
+                )
+            )
 
         body = svc.people.return_value.createContact.call_args.kwargs["body"]
         assert len(body["phoneNumbers"]) == 1
@@ -563,6 +707,7 @@ class TestPhonesPriorityOverDeprecatedPhone:
 # =============================================================================
 # Test 15: _format_contact with 3 phones of different types
 # =============================================================================
+
 
 class TestFormatContactThreePhones:
     """_format_contact renders multi-phone contact with correct labels per type."""
@@ -607,13 +752,16 @@ class TestFormatContactThreePhones:
         }
         result = _format_contact(person)
         lines = result.split("\n")
-        phone_lines = [l for l in lines if l.startswith("Phone:")]
-        assert len(phone_lines) == 0, "Multi-phone should use 'Phones:' block, not 'Phone:' line"
+        phone_lines = [line for line in lines if line.startswith("Phone:")]
+        assert len(phone_lines) == 0, (
+            "Multi-phone should use 'Phones:' block, not 'Phone:' line"
+        )
 
 
 # =============================================================================
 # Test 16: _normalize_phone for internal short numbers
 # =============================================================================
+
 
 class TestNormalizePhoneInternal:
     """_normalize_phone must NOT mutate short internal numbers."""

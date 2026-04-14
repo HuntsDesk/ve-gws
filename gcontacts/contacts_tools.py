@@ -37,8 +37,19 @@ _search_cache_warmed_up: Dict[str, bool] = {}
 
 # Known phone types supported by Google People API (custom types also allowed)
 KNOWN_PHONE_TYPES = {
-    "home", "work", "mobile", "homeFax", "workFax", "otherFax",
-    "pager", "workMobile", "workPager", "main", "googleVoice", "other", "internal",
+    "home",
+    "work",
+    "mobile",
+    "homeFax",
+    "workFax",
+    "otherFax",
+    "pager",
+    "workMobile",
+    "workPager",
+    "main",
+    "googleVoice",
+    "other",
+    "internal",
 }
 
 
@@ -483,8 +494,14 @@ def _merge_phones(
     if mode == "replace":
         return new_phones
     if mode == "remove":
-        remove_normalized = {_normalize_phone(p["value"]) for p in new_phones if p.get("value")}
-        return [p for p in existing if _normalize_phone(p.get("value", "")) not in remove_normalized]
+        remove_normalized = {
+            _normalize_phone(p["value"]) for p in new_phones if p.get("value")
+        }
+        return [
+            p
+            for p in existing
+            if _normalize_phone(p.get("value", "")) not in remove_normalized
+        ]
     # merge: add new entries that don't already exist (dedup by canonicalForm or normalized value)
     result = list(existing)
     existing_keys = set()
@@ -518,8 +535,14 @@ def _merge_emails(
     if mode == "replace":
         return new_emails
     if mode == "remove":
-        remove_normalized = {_normalize_email(e["value"]) for e in new_emails if e.get("value")}
-        return [e for e in existing if _normalize_email(e.get("value", "")) not in remove_normalized]
+        remove_normalized = {
+            _normalize_email(e["value"]) for e in new_emails if e.get("value")
+        }
+        return [
+            e
+            for e in existing
+            if _normalize_email(e.get("value", "")) not in remove_normalized
+        ]
     # merge: add new entries not already present (dedup by lowercased address)
     result = list(existing)
     existing_keys = {_normalize_email(e.get("value", "")) for e in existing}
@@ -547,6 +570,7 @@ def _merge_organizations(
     Returns:
         Merged org list.
     """
+
     def organization_key(org: Dict[str, Any]) -> tuple[str, str, str, str]:
         return tuple(
             ((org.get(field) or "").strip().lower())
@@ -1256,8 +1280,12 @@ async def manage_contacts_batch(
 
         # Validate field param — required to avoid multi-field mask issues
         valid_fields = {
-            "names", "phoneNumbers", "emailAddresses",
-            "organizations", "biographies", "addresses",
+            "names",
+            "phoneNumbers",
+            "emailAddresses",
+            "organizations",
+            "biographies",
+            "addresses",
         }
         if not field:
             raise UserInputError(
