@@ -6,11 +6,57 @@ from gslides.slides_helpers import (
     build_element_properties,
     build_solid_fill,
     build_text_range,
+    collect_text_element_ids,
     extract_notes_text,
     find_notes_shape_id,
     new_object_id,
     parse_hex_color_to_rgb,
 )
+
+
+_PRESENTATION = {
+    "slides": [
+        {
+            "objectId": "s1",
+            "pageElements": [
+                {
+                    "objectId": "title1",
+                    "shape": {"text": {"textElements": [{"textRun": {"content": "A"}}]}},
+                },
+                {"objectId": "empty", "shape": {"text": {}}},  # no textElements
+                {"objectId": "image", "image": {}},  # not a shape
+            ],
+        },
+        {
+            "objectId": "s2",
+            "pageElements": [
+                {
+                    "objectId": "body2",
+                    "shape": {"text": {"textElements": [{"textRun": {"content": "B"}}]}},
+                },
+            ],
+        },
+    ]
+}
+
+
+def test_collect_text_element_ids_entire_presentation():
+    ids = collect_text_element_ids(_PRESENTATION)
+    assert ids == ["title1", "body2"]
+
+
+def test_collect_text_element_ids_single_slide():
+    ids = collect_text_element_ids(_PRESENTATION, page_object_id="s2")
+    assert ids == ["body2"]
+
+
+def test_collect_text_element_ids_missing_slide_returns_empty():
+    assert collect_text_element_ids(_PRESENTATION, page_object_id="nope") == []
+
+
+def test_collect_text_element_ids_empty_presentation():
+    assert collect_text_element_ids({}) == []
+    assert collect_text_element_ids({"slides": []}) == []
 
 
 def test_parse_hex_color_valid():

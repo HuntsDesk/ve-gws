@@ -17,6 +17,7 @@ from gslides.slides_helpers import (
     build_element_properties,
     build_solid_fill,
     build_text_range,
+    collect_text_element_ids,
     extract_notes_text,
     find_notes_shape_id,
     new_object_id,
@@ -409,6 +410,101 @@ async def format_slides_text(
     return (
         f"Applied text formatting to element '{page_element_id}' in presentation "
         f"'{presentation_id}' for {user_google_email}. Fields: {', '.join(fields)}."
+    )
+
+
+@server.tool()
+@handle_http_errors("format_all_slides_text", service_type="slides")
+@require_google_service("slides", "slides")
+async def format_all_slides_text(
+    service,
+    user_google_email: str,
+    presentation_id: str,
+    page_object_id: Optional[str] = None,
+    bold: Optional[bool] = None,
+    italic: Optional[bool] = None,
+    underline: Optional[bool] = None,
+    strikethrough: Optional[bool] = None,
+    font_family: Optional[str] = None,
+    font_size: Optional[float] = None,
+    text_color: Optional[str] = None,
+) -> str:
+    """
+    Apply text formatting to EVERY text element on a slide or across the whole
+    presentation.
+
+    Walks the presentation, collects every page element that contains text,
+    and issues one updateTextStyle request per element in a single batchUpdate.
+    Use this to bulk-restyle fonts, colors, or emphasis without specifying
+    every element ID individually.
+
+    Args:
+        presentation_id: ID of the presentation.
+        page_object_id: Optional slide ID. If provided, only formats text on
+            that one slide. If omitted, formats every slide in the presentation.
+        bold, italic, underline, strikethrough: Optional formatting flags.
+        font_family: Optional font family (e.g., "Arial").
+        font_size: Optional size in points.
+        text_color: Optional hex color (e.g., "#333333").
+    """
+    logger.info(
+        f"[format_all_slides_text] pres='{presentation_id}' page='{page_object_id}'"
+    )
+
+    style: Dict[str, Any] = {}
+    fields: List[str] = []
+    if bold is not None:
+        style["bold"] = bold
+        fields.append("bold")
+    if italic is not None:
+        style["italic"] = italic
+        fields.append("italic")
+    if underline is not None:
+        style["underline"] = underline
+        fields.append("underline")
+    if strikethrough is not None:
+        style["strikethrough"] = strikethrough
+        fields.append("strikethrough")
+    if font_family is not None:
+        style["fontFamily"] = font_family
+        fields.append("fontFamily")
+    if font_size is not None:
+        style["fontSize"] = {"magnitude": font_size, "unit": "PT"}
+        fields.append("fontSize")
+    if text_color is not None:
+        style["foregroundColor"] = {
+            "opaqueColor": {"rgbColor": parse_hex_color_to_rgb(text_color)}
+        }
+        fields.append("foregroundColor")
+
+    if not fields:
+        return "No formatting options were provided — nothing to update."
+
+    presentation = await asyncio.to_thread(
+        service.presentations().get(presentationId=presentation_id).execute
+    )
+    element_ids = collect_text_element_ids(presentation, page_object_id)
+    if not element_ids:
+        scope = f"slide '{page_object_id}'" if page_object_id else "presentation"
+        return f"No text-bearing elements found in {scope} '{presentation_id}'."
+
+    fields_str = ",".join(fields)
+    requests = [
+        {
+            "updateTextStyle": {
+                "objectId": eid,
+                "style": style,
+                "textRange": {"type": "ALL"},
+                "fields": fields_str,
+            }
+        }
+        for eid in element_ids
+    ]
+    await slides_batch_update(service, presentation_id, requests)
+    scope = f"slide '{page_object_id}'" if page_object_id else "entire presentation"
+    return (
+        f"Applied text formatting to {len(element_ids)} element(s) across {scope} "
+        f"of '{presentation_id}' for {user_google_email}. Fields: {fields_str}."
     )
 
 

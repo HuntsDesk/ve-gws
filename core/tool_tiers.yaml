@@ -71,6 +71,7 @@ docs:
     - manage_document_comment
     - insert_doc_markdown
     - insert_doc_link
+    - list_doc_tabs
   complete:
     - insert_doc_image
     - update_doc_headers_footers
@@ -135,6 +136,7 @@ slides:
     - get_page
     - get_page_thumbnail
     - format_slides_text
+    - format_all_slides_text
     - format_slides_paragraph
     - style_slides_shape
     - set_slides_background

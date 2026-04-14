@@ -19,7 +19,7 @@
 
 </div>
 
-> **Apollo-VE — enhanced fork.** [`HuntsDesk/Apollo-VE`](https://github.com/HuntsDesk/Apollo-VE) adds **25 additional tools** on top of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — deeper Slides automation (shapes, text boxes, speaker notes, reorder/duplicate, backgrounds, styling), native markdown-to-Docs rendering, Docs smart chips (person/file/get), advanced Sheets controls (data validation, named ranges, range protection, tab management), recursive Drive folder copy, and Drive revision history (list + restore). Feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*. All 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes) below.
+> **Apollo-VE — enhanced fork.** [`HuntsDesk/Apollo-VE`](https://github.com/HuntsDesk/Apollo-VE) adds **27 additional tools** on top of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — deeper Slides automation (shapes, text boxes, speaker notes, reorder/duplicate, backgrounds, styling), native markdown-to-Docs rendering, Docs smart chips (person/file/get), advanced Sheets controls (data validation, named ranges, range protection, tab management), recursive Drive folder copy, and Drive revision history (list + restore). Feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*. All 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes) below.
 
 <div align="center">
 <a href="https://www.pulsemcp.com/servers/taylorwilsdon-google-workspace">
@@ -779,6 +779,7 @@ Saved files expire after 1 hour and are cleaned up automatically.
 | <sub>`get_doc_as_markdown`</sub> | <sub>Extended</sub> | <sub>Export document as formatted Markdown with optional comments</sub> |
 | <sub>`insert_doc_markdown`</sub> | <sub>Extended</sub> | <sub>Insert markdown content with native Docs formatting (headings, bold/italic, bullets, numbered lists); supports tab/segment targeting and end-of-segment append</sub> |
 | <sub>`insert_doc_link`</sub> | <sub>Extended</sub> | <sub>Insert clickable linked text at a specified index (tab-aware)</sub> |
+| <sub>`list_doc_tabs`</sub> | <sub>Extended</sub> | <sub>List all tabs (and nested child tabs) with tab IDs, titles, indices, and nesting depth</sub> |
 | <sub>`insert_doc_image`</sub> | <sub>Complete</sub> | <sub>Insert images from Drive/URLs</sub> |
 | <sub>`update_doc_headers_footers`</sub> | <sub>Complete</sub> | <sub>Create or update headers and footers with correct segment-aware writes</sub> |
 | <sub>`batch_update_doc`</sub> | <sub>Complete</sub> | <sub>Execute atomic multi-step Docs API operations including named ranges, section breaks, document/section layout, header/footer creation, segment-aware inserts, images, tables, and rich formatting</sub> |
@@ -823,6 +824,7 @@ Saved files expire after 1 hour and are cleaned up automatically.
 | <sub>`get_page`</sub> | <sub>Extended</sub> | <sub>Get specific slide information</sub> |
 | <sub>`get_page_thumbnail`</sub> | <sub>Extended</sub> | <sub>Generate slide thumbnails</sub> |
 | <sub>`format_slides_text`</sub> | <sub>Extended</sub> | <sub>Apply text formatting (bold/italic/underline/strikethrough/color/font/size) to a slide element</sub> |
+| <sub>`format_all_slides_text`</sub> | <sub>Extended</sub> | <sub>Apply text formatting to EVERY text element on a slide, or across the whole presentation in one call</sub> |
 | <sub>`format_slides_paragraph`</sub> | <sub>Extended</sub> | <sub>Apply paragraph alignment, line spacing, spacing above/below, and bullet presets</sub> |
 | <sub>`style_slides_shape`</sub> | <sub>Extended</sub> | <sub>Style a shape's fill color, outline color/weight, and dash style</sub> |
 | <sub>`set_slides_background`</sub> | <sub>Extended</sub> | <sub>Set the background color of a slide</sub> |

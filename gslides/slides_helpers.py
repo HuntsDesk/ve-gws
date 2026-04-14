@@ -153,3 +153,28 @@ def extract_notes_text(slide: Dict[str, Any]) -> str:
             if tr and "content" in tr:
                 parts.append(tr["content"])
     return "".join(parts)
+
+
+def collect_text_element_ids(
+    presentation: Dict[str, Any],
+    page_object_id: Optional[str] = None,
+) -> List[str]:
+    """
+    Return every page-element objectId that contains text runs.
+
+    If page_object_id is given, limit the search to that slide; otherwise
+    scan every slide in the presentation. Notes shapes are excluded — use
+    update_slides_speaker_notes to touch those.
+    """
+    ids: List[str] = []
+    for slide in presentation.get("slides", []) or []:
+        if page_object_id and slide.get("objectId") != page_object_id:
+            continue
+        for element in slide.get("pageElements", []) or []:
+            shape = element.get("shape") or {}
+            text = shape.get("text")
+            if text and (text.get("textElements") or []):
+                obj_id = element.get("objectId")
+                if obj_id:
+                    ids.append(obj_id)
+    return ids

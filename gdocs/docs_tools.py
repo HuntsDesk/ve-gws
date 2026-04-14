@@ -2568,6 +2568,61 @@ async def update_doc_tab(
 
 
 @server.tool()
+@handle_http_errors("list_doc_tabs", is_read_only=True, service_type="docs")
+@require_google_service("docs", "docs_readonly")
+async def list_doc_tabs(
+    service: Any,
+    user_google_email: str,
+    document_id: str,
+) -> str:
+    """
+    List all tabs in a Google Doc, including nested child tabs.
+
+    Returns a flattened hierarchy with tab IDs, titles, index positions, and
+    nesting depth. Useful as a prerequisite for any tool that takes a `tab_id`
+    parameter (insert_doc_markdown, insert_doc_link, modify_doc_text, etc.).
+
+    Args:
+        document_id: ID of the document.
+    """
+    logger.info(f"[list_doc_tabs] Doc={document_id}")
+
+    doc = await asyncio.to_thread(
+        service.documents()
+        .get(documentId=document_id, includeTabsContent=True)
+        .execute
+    )
+    tabs = doc.get("tabs", [])
+    if not tabs:
+        return f"Document {document_id} has no tabs (legacy single-body document)."
+
+    flat: List[dict] = []
+
+    def walk(tab_list, depth):
+        for tab in tab_list:
+            props = tab.get("tabProperties", {}) or {}
+            flat.append(
+                {
+                    "tabId": props.get("tabId"),
+                    "title": props.get("title") or "(untitled)",
+                    "index": props.get("index"),
+                    "depth": depth,
+                }
+            )
+            walk(tab.get("childTabs", []) or [], depth + 1)
+
+    walk(tabs, 0)
+
+    lines = [f"Found {len(flat)} tab(s) in document {document_id}:"]
+    for t in flat:
+        indent = "  " * (t["depth"] + 1)
+        lines.append(
+            f"{indent}- [{t['index']}] \"{t['title']}\" (tabId: {t['tabId']})"
+        )
+    return "\n".join(lines)
+
+
+@server.tool()
 @handle_http_errors("insert_doc_markdown", service_type="docs")
 @require_google_service("docs", "docs_write")
 async def insert_doc_markdown(
