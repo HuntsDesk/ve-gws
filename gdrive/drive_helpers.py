@@ -221,8 +221,10 @@ def build_drive_list_params(
     if page_token:
         list_params["pageToken"] = page_token
 
-    if order_by:
-        list_params["orderBy"] = order_by
+    if order_by is not None:
+        normalized_order_by = order_by.strip()
+        if normalized_order_by:
+            list_params["orderBy"] = normalized_order_by
 
     if drive_id:
         list_params["driveId"] = drive_id

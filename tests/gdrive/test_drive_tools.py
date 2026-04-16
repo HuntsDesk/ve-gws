@@ -421,6 +421,18 @@ def test_build_params_default_is_detailed():
     assert params_default["fields"] == params_true["fields"]
 
 
+def test_build_params_order_by_trims_surrounding_whitespace():
+    """order_by is normalized before being sent to the Drive API."""
+    params = build_drive_list_params(query="q", page_size=5, order_by="  modifiedTime desc  ")
+    assert params["orderBy"] == "modifiedTime desc"
+
+
+def test_build_params_order_by_omits_whitespace_only_values():
+    """Whitespace-only order_by values are omitted to avoid invalid API requests."""
+    params = build_drive_list_params(query="q", page_size=5, order_by="   ")
+    assert "orderBy" not in params
+
+
 # ---------------------------------------------------------------------------
 # search_drive_files — detailed flag
 # ---------------------------------------------------------------------------
