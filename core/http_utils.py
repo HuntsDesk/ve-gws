@@ -242,7 +242,9 @@ async def ssrf_safe_fetch(
 
 @asynccontextmanager
 async def ssrf_safe_stream(
-    url: str, *, timeout: Optional[httpx.Timeout] = None
+    url: str,
+    *,
+    timeout: httpx.Timeout = httpx.Timeout(30.0, connect=5.0),
 ) -> AsyncIterator[httpx.Response]:
     """
     SSRF-safe streaming fetch: validates each redirect target against private
