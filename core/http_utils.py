@@ -142,9 +142,7 @@ async def fetch_url_with_pinned_ip(url: str) -> httpx.Response:
     parsed_url = urlparse(url)
     redacted_url = redact_url(url)
     if parsed_url.scheme not in ("http", "https"):
-        raise ValueError(
-            f"Only http:// and https:// are supported: {redacted_url}"
-        )
+        raise ValueError(f"Only http:// and https:// are supported: {redacted_url}")
     if not parsed_url.hostname:
         raise ValueError(f"Invalid URL: missing hostname ({redacted_url})")
 
@@ -251,9 +249,7 @@ async def ssrf_safe_stream(url: str) -> AsyncIterator[httpx.Response]:
         parsed = urlparse(current_url)
         redacted_url = redact_url(current_url)
         if parsed.scheme not in ("http", "https"):
-            raise ValueError(
-                f"Only http:// and https:// are supported: {redacted_url}"
-            )
+            raise ValueError(f"Only http:// and https:// are supported: {redacted_url}")
         if not parsed.hostname:
             raise ValueError(f"Invalid URL: missing hostname ({redacted_url})")
 
@@ -296,9 +292,7 @@ async def ssrf_safe_stream(url: str) -> AsyncIterator[httpx.Response]:
             await resp.aclose()
             await client.aclose()
             if not location:
-                raise Exception(
-                    f"Redirect with no Location header from {redacted_url}"
-                )
+                raise Exception(f"Redirect with no Location header from {redacted_url}")
             location = urljoin(current_url, location)
             redirect_parsed = urlparse(location)
             if redirect_parsed.scheme not in ("http", "https"):

@@ -6,7 +6,6 @@ import sys
 from unittest.mock import Mock
 from contextlib import asynccontextmanager
 
-import httpx
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -602,12 +601,14 @@ def test_try_read_local_attachment_rejects_untrusted_origin(tmp_path, monkeypatc
     monkeypatch.setattr(
         storage,
         "get_attachment_metadata",
-        lambda requested_file_id: {
-            "filename": "report.pdf",
-            "mime_type": "application/pdf",
-        }
-        if requested_file_id == file_id
-        else None,
+        lambda requested_file_id: (
+            {
+                "filename": "report.pdf",
+                "mime_type": "application/pdf",
+            }
+            if requested_file_id == file_id
+            else None
+        ),
     )
     monkeypatch.setattr(
         storage,
@@ -635,7 +636,9 @@ def test_try_read_local_attachment_requires_metadata_without_scan_fallback(
     assert result is None
 
 
-def test_try_read_local_attachment_checks_file_size_before_reading(tmp_path, monkeypatch):
+def test_try_read_local_attachment_checks_file_size_before_reading(
+    tmp_path, monkeypatch
+):
     file_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     file_path = tmp_path / "large.bin"
     file_path.write_bytes(b"0123456789")
@@ -644,12 +647,14 @@ def test_try_read_local_attachment_checks_file_size_before_reading(tmp_path, mon
     monkeypatch.setattr(
         storage,
         "get_attachment_metadata",
-        lambda requested_file_id: {
-            "filename": "large.bin",
-            "mime_type": "application/octet-stream",
-        }
-        if requested_file_id == file_id
-        else None,
+        lambda requested_file_id: (
+            {
+                "filename": "large.bin",
+                "mime_type": "application/octet-stream",
+            }
+            if requested_file_id == file_id
+            else None
+        ),
     )
     monkeypatch.setattr(
         storage,

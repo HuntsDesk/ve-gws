@@ -69,9 +69,7 @@ async def _download_url_to_bytes(url: str) -> tuple[bytes, Optional[str]]:
         async for chunk in resp.aiter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
             total_bytes += len(chunk)
             if total_bytes > MAX_DOWNLOAD_BYTES:
-                raise Exception(
-                    f"Download exceeded {MAX_DOWNLOAD_BYTES} byte limit"
-                )
+                raise Exception(f"Download exceeded {MAX_DOWNLOAD_BYTES} byte limit")
             chunks.append(chunk)
 
     return b"".join(chunks), content_type
