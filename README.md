@@ -1,8 +1,8 @@
 <!-- mcp-name: io.github.taylorwilsdon/workspace-mcp -->
 
-# Enhanced Google Workspace MCP — Shareable Package (ve-gws)
+# VE Google Workspace MCP (ve-gws)
 
-Enhanced Google Workspace MCP server for Claude Code and other MCP clients. Fork of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) with **28 additional authoring-focused tools** on top (deeper Slides, Docs markdown, smart chips, Sheets data validation, recursive Drive copy, revisions). See [Why VE-GWS (vs. upstream)](#why-ve-gws-vs-upstream) below.
+Most Google Workspace MCPs let you read. This one lets you write — a Python fork of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) with **28 additional authoring tools** on top (deeper Slides, markdown-to-Docs, smart chips, Sheets data validation, recursive Drive copy, revisions). See [Why VE-GWS (vs. upstream)](#why-ve-gws-vs-upstream) below.
 
 > **Part of [Vibe Entrepreneurs](https://vibeentrepreneurs.com)** — a community for any vibe coders shipping real work with AI: solo indie builders, product-minded devs, agency folks, side-project makers. You don't need to use ve-gws to join. Come say hi: **[vibeentrepreneurs.com](https://vibeentrepreneurs.com)**.
 >
