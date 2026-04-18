@@ -50,3 +50,5 @@ Be kind. Assume good faith. Disagree about ideas, not people.
 
 - [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit) — productivity kit (companion repo)
 - [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — upstream fork parent
+- [`blakesplay/apollo`](https://github.com/blakesplay/apollo) — source of many of ve-gws's enhanced tool ideas (TypeScript, ported manually)
+- [`piotr-agier/google-drive-mcp`](https://github.com/piotr-agier/google-drive-mcp) — Apollo was originally based on this earlier Google Drive MCP; acknowledging the full attribution chain

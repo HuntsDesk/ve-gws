@@ -30,7 +30,7 @@
 | **Sheets** | Data validation rules · named ranges · range protection · sheet tab management (add/rename/delete/reorder) |
 | **Drive** | Recursive folder copy · list revision history · restore prior revisions |
 
-Some feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*.
+Some feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo), which was itself based on [`piotr-agier/google-drive-mcp`](https://github.com/piotr-agier/google-drive-mcp). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*.
 
 **Quality**: 822 tests pass (803 upstream + 19 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes).
 
