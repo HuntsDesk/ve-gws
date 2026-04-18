@@ -19,7 +19,7 @@
 
 </div>
 
-> **Apollo-VE — enhanced fork.** [`HuntsDesk/Apollo-VE`](https://github.com/HuntsDesk/Apollo-VE) adds **27 additional tools** on top of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — deeper Slides automation (shapes, text boxes, speaker notes, reorder/duplicate, backgrounds, styling), native markdown-to-Docs rendering, Docs smart chips (person/file/get), advanced Sheets controls (data validation, named ranges, range protection, tab management), recursive Drive folder copy, and Drive revision history (list + restore). Feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*. All 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes) below.
+> **VE-GWS — enhanced fork** (part of the `ve-*` framework). [`HuntsDesk/ve-gws`](https://github.com/HuntsDesk/ve-gws) adds **27 additional tools** on top of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — deeper Slides automation (shapes, text boxes, speaker notes, reorder/duplicate, backgrounds, styling), native markdown-to-Docs rendering, Docs smart chips (person/file/get), advanced Sheets controls (data validation, named ranges, range protection, tab management), recursive Drive folder copy, and Drive revision history (list + restore). Feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*. All 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes) below. Companion to [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit) (the vibe-coding kit).
 
 <div align="center">
 <a href="https://www.pulsemcp.com/servers/taylorwilsdon-google-workspace">
@@ -1428,7 +1428,7 @@ When calling a tool:
 
 ## <span style="color:#adbcbc">🔄 Pulling Upstream Changes</span>
 
-Apollo-VE tracks [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) as an upstream remote so improvements from the original project can be merged in periodically.
+VE-GWS tracks [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) as an upstream remote so improvements from the original project can be merged in periodically.
 
 ```bash
 # First time only — add upstream (already configured in this repo's clones)
@@ -1447,7 +1447,7 @@ git merge upstream/main
 git push origin main
 ```
 
-Because Apollo-VE adds 25 tools and modifies `gslides/slides_tools.py`, `gdocs/docs_tools.py`, `gsheets/sheets_tools.py`, `gdrive/drive_tools.py`, and `core/tool_tiers.yaml`, merges will occasionally produce conflicts in those files. Resolve by keeping both sides' changes and re-running the test suite (`uv run pytest tests/`) before pushing.
+Because VE-GWS adds 25 tools and modifies `gslides/slides_tools.py`, `gdocs/docs_tools.py`, `gsheets/sheets_tools.py`, `gdrive/drive_tools.py`, and `core/tool_tiers.yaml`, merges will occasionally produce conflicts in those files. Resolve by keeping both sides' changes and re-running the test suite (`uv run pytest tests/`) before pushing.
 
 ---
 
