@@ -34,7 +34,9 @@ Some feature ideas ported from [`blakesplay/apollo`](https://github.com/blakespl
 
 **Quality**: 822 tests pass (803 upstream + 19 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes).
 
-**`ve-*` family**: Companion to [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit), a Claude Code productivity kit (persistent task board, process gates, Docker autonomous worker). VE-GWS is the Google Workspace MCP piece of that toolchain — install standalone or alongside.
+**`ve-*` family**: Companion to [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit) (Vibe Entrepreneurs Kit — a Claude Code productivity kit with persistent task board, process gates, Docker autonomous worker). VE-GWS is the Google Workspace MCP piece of that toolchain — install standalone or alongside.
+
+> **From the [Vibe Entrepreneurs](https://vibeentrepreneurs.com) community** — a space for any vibe coders shipping real work with AI: solo indie builders, product-minded devs, agency folks, side-project makers. You don't need to use ve-gws to join. Come say hi: **[vibeentrepreneurs.com](https://vibeentrepreneurs.com)**.
 
 <div align="center">
 <a href="https://www.pulsemcp.com/servers/taylorwilsdon-google-workspace">
