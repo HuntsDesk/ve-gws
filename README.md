@@ -19,7 +19,22 @@
 
 </div>
 
-> **VE-GWS — enhanced fork** (part of the `ve-*` framework). [`HuntsDesk/ve-gws`](https://github.com/HuntsDesk/ve-gws) adds **27 additional tools** on top of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) — deeper Slides automation (shapes, text boxes, speaker notes, reorder/duplicate, backgrounds, styling), native markdown-to-Docs rendering, Docs smart chips (person/file/get), advanced Sheets controls (data validation, named ranges, range protection, tab management), recursive Drive folder copy, and Drive revision history (list + restore). Feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*. All 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes) below. Companion to [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit) (the vibe-coding kit).
+## Why VE-GWS (vs. upstream)
+
+[`HuntsDesk/ve-gws`](https://github.com/HuntsDesk/ve-gws) is a fork of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) that adds **27 tools** in the gaps upstream doesn't cover — mostly around authoring workflows (building presentations, rendering formatted docs, managing structured sheets).
+
+| Area | Additions |
+|------|-----------|
+| **Slides** | Create shapes + text boxes · set slide backgrounds · reorder slides · duplicate slides · read/write speaker notes · style shapes + text + paragraphs · delete elements |
+| **Docs** | Insert native markdown (rendered, not as a code block) · insert person + file smart chips · read existing smart chips · find-and-replace |
+| **Sheets** | Data validation rules · named ranges · range protection · sheet tab management (add/rename/delete/reorder) |
+| **Drive** | Recursive folder copy · list revision history · restore prior revisions |
+
+Some feature ideas ported from [`blakesplay/apollo`](https://github.com/blakesplay/apollo). See the [**Available Tools**](#-available-tools) tables below — additions are tagged *Extended* or *Complete*.
+
+**Quality**: 646 tests pass (617 upstream + 29 new). Upstream commits from Taylor's repo are merged in periodically — see [Pulling Upstream Changes](#-pulling-upstream-changes).
+
+**`ve-*` family**: Companion to [`HuntsDesk/ve-kit`](https://github.com/HuntsDesk/ve-kit), a Claude Code productivity kit (persistent task board, process gates, Docker autonomous worker). VE-GWS is the Google Workspace MCP piece of that toolchain — install standalone or alongside.
 
 <div align="center">
 <a href="https://www.pulsemcp.com/servers/taylorwilsdon-google-workspace">
