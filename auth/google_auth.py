@@ -188,8 +188,8 @@ def load_client_secrets_from_env() -> Optional[Dict[str, Any]]:
     Loads the client secrets from environment variables.
 
     Environment variables used:
-        - GOOGLE_OAUTH_CLIENT_ID: OAuth 2.0 client ID
-        - GOOGLE_OAUTH_CLIENT_SECRET: OAuth 2.0 client secret
+        - GOOGLE_OAUTH_CLIENT_ID: OAuth client ID (required)
+        - GOOGLE_OAUTH_CLIENT_SECRET: OAuth client secret (optional for public clients)
         - GOOGLE_OAUTH_REDIRECT_URI: (optional) OAuth redirect URI
 
     Returns:
@@ -200,22 +200,26 @@ def load_client_secrets_from_env() -> Optional[Dict[str, Any]]:
     client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
     redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
 
-    if client_id and client_secret:
-        # Create config structure that matches Google client secrets format
-        web_config = {
+    if client_id:
+        # Create config structure that matches Google client secrets format.
+        client_config = {
             "client_id": client_id,
-            "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
         }
+        # google-auth-oauthlib token exchange expects this key to exist.
+        # Keep it as an empty string for public clients.
+        client_config["client_secret"] = client_secret or ""
 
         # Add redirect_uri if provided via environment variable
         if redirect_uri:
-            web_config["redirect_uris"] = [redirect_uri]
+            client_config["redirect_uris"] = [redirect_uri]
 
-        # Return the full config structure expected by Google OAuth library
-        config = {"web": web_config}
+        # google-auth-oauthlib supports both "web" and "installed" shapes.
+        # Use "installed" for public clients without a secret.
+        top_level_key = "web" if client_secret else "installed"
+        config = {top_level_key: client_config}
 
         logger.info("Loaded OAuth client credentials from environment variables")
         return config
@@ -245,8 +249,14 @@ def load_client_secrets(client_secrets_path: str) -> Dict[str, Any]:
     # First, try to load from environment variables
     env_config = load_client_secrets_from_env()
     if env_config:
-        # Extract the "web" config from the environment structure
-        return env_config["web"]
+        # Extract either "web" (confidential) or "installed" (public) config.
+        if "web" in env_config:
+            return env_config["web"]
+        if "installed" in env_config:
+            return env_config["installed"]
+        raise ValueError(
+            "Invalid environment OAuth client config format. Expected 'web' or 'installed'."
+        )
 
     # Fall back to loading from file
     try:

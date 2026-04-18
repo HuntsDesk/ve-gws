@@ -82,7 +82,7 @@
 
 Workspace MCP is the single most complete MCP server that integrates all major Google Workspace services with AI assistants. It supports both single-user operation and multi-user authentication via OAuth 2.1, making it a powerful backend for custom applications. Built with FastMCP for optimal performance, featuring advanced authentication handling, service caching, and streamlined development patterns. The entire toolset is available for CLI usage supporting both local and remote instances.
 
-**Simplified Setup**: Now uses Google Desktop OAuth clients - no redirect URIs or port configuration needed!
+**Simplified Setup**: can use Google Desktop OAuth clients for local runs - no redirect URIs or port configuration needed!
 
 
 ## <span style="color:#adbcbc">Features</span>
@@ -94,7 +94,7 @@ Workspace MCP is the single most complete MCP server that integrates all major G
 <td valign="top" width="50%">
 
 **📧 Gmail** — Complete email management, end-to-end coverage<br>
-**📁 Drive** — File operations with sharing, permissions & Office formats<br>
+**📁 Drive** — File operations with sharing, permissions, Office files, PDFs & images<br>
 **📅 Calendar** — Full event management with advanced features<br>
 **📝 Docs** — Deep, fine-grained editing, formatting & comments<br>
 **📊 Sheets** — Flexible cell management, formatting & conditional rules<br>
@@ -175,6 +175,12 @@ The license is 21 lines and says what it means.
 
 </div>
 
+<table>
+<tr>
+<td valign="top" width="50%">
+
+**Confidential Client Quick Start**
+
 ```bash
 # 1. Credentials
 export GOOGLE_OAUTH_CLIENT_ID="..."
@@ -189,6 +195,34 @@ uvx workspace-mcp --tool-tier complete   # everything
 uv run main.py --tools gmail drive calendar
 ```
 
+</td>
+<td valign="top" width="50%">
+
+**Secretless / Public OAuth 2.1 (PKCE) Quick Start**
+
+```bash
+# 1. Credentials
+export MCP_ENABLE_OAUTH21=true
+export GOOGLE_OAUTH_CLIENT_ID="..."
+export WORKSPACE_MCP_PORT=8000
+export GOOGLE_OAUTH_REDIRECT_URI="http://localhost:${WORKSPACE_MCP_PORT}/oauth2callback"
+export OAUTHLIB_INSECURE_TRANSPORT=1
+# Leave GOOGLE_OAUTH_CLIENT_SECRET unset for public PKCE clients
+export FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY="$(openssl rand -hex 32)"
+
+# 2. Launch — OAuth 2.1 requires HTTP transport
+uvx workspace-mcp --transport streamable-http --tool-tier core
+uvx workspace-mcp --transport streamable-http --tool-tier extended
+uvx workspace-mcp --transport streamable-http --tool-tier complete
+
+# Or cherry-pick services
+uv run main.py --transport streamable-http --tools gmail drive calendar
+```
+
+</td>
+</tr>
+</table>
+
 <sub>[Credential setup →](#-credential-configuration) · [All launch options →](#start-the-server) · [Tier details →](#tool-tiers)</sub>
 
 <details open>
@@ -199,7 +233,7 @@ uv run main.py --tools gmail drive calendar
 |----------|:---:|---------|
 | **🔐 Authentication** | | |
 | `GOOGLE_OAUTH_CLIENT_ID` | **required** | OAuth client ID from Google Cloud |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | **required** | OAuth client secret |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | | OAuth client secret for confidential clients; optional for public OAuth 2.1 PKCE clients |
 | `OAUTHLIB_INSECURE_TRANSPORT` | **required**&ast; | Set to `1` for development — allows `http://` redirect |
 | `USER_GOOGLE_EMAIL` | | Default email for single-user auth |
 | `GOOGLE_CLIENT_SECRET_PATH` | | Custom path to `client_secret.json` |
@@ -220,7 +254,7 @@ uv run main.py --tools gmail drive calendar
 | `OAUTH_CUSTOM_REDIRECT_URIS` | | Comma-separated additional redirect URIs |
 | `OAUTH_ALLOWED_ORIGINS` | | Comma-separated additional CORS origins |
 | `WORKSPACE_MCP_OAUTH_PROXY_STORAGE_BACKEND` | | `memory`, `disk`, or `valkey` — see [storage backends](#oauth-proxy-storage-backends) |
-| `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` | | Custom encryption key for OAuth proxy storage |
+| `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` | | Custom encryption key for OAuth proxy storage; required for public OAuth 2.1 clients when `GOOGLE_OAUTH_CLIENT_SECRET` is omitted |
 | **🔧 Service Account** | | |
 | `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` | | Path to service account JSON key file (domain-wide delegation) |
 | `GOOGLE_SERVICE_ACCOUNT_KEY_JSON` | | Inline service account JSON key (alternative to file) |
@@ -261,8 +295,8 @@ uv run main.py --tools gmail drive calendar
 
 1. **Create Project** — [Open Console →](https://console.cloud.google.com/) → Create new project
 2. **Create OAuth Credentials** — APIs & Services → Credentials → Create Credentials → OAuth Client ID
-   - Choose **Desktop Application** (no redirect URIs needed!)
-   - Download and note your Client ID & Client Secret
+   - Choose **Desktop Application** for a public PKCE client (no redirect URIs needed) or **Web Application** for a confidential client
+   - Download and note your Client ID and, if issued, Client Secret
 3. **Enable APIs** — APIs & Services → Library, then enable each service:
 
    | | | | |
@@ -276,6 +310,7 @@ uv run main.py --tools gmail drive calendar
    export GOOGLE_OAUTH_CLIENT_ID="your-client-id"
    export GOOGLE_OAUTH_CLIENT_SECRET="your-secret"
    ```
+   For public OAuth 2.1 PKCE clients, omit `GOOGLE_OAUTH_CLIENT_SECRET` and set `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` instead.
 
 <sub>[Full OAuth documentation →](https://developers.google.com/workspace/guides/auth-overview) · [Credential setup details →](#-credential-configuration)</sub>
 
@@ -686,7 +721,7 @@ cp .env.oauth21 .env
 | <sub>Tool</sub> | <sub>Tier</sub> | <sub>Description</sub> |
 |------|------|-------------|
 | <sub>`search_drive_files`</sub> | <sub>Core</sub> | <sub>Search files with query syntax</sub> |
-| <sub>`get_drive_file_content`</sub> | <sub>Core</sub> | <sub>Read file content (Office formats)</sub> |
+| <sub>`get_drive_file_content`</sub> | <sub>Core</sub> | <sub>Read file content (Office, PDF, image)</sub> |
 | <sub>`get_drive_file_download_url`</sub> | <sub>Core</sub> | <sub>Download Drive files to local disk</sub> |
 | <sub>`create_drive_file`</sub> | <sub>Core</sub> | <sub>Create files or fetch from URLs</sub> |
 | <sub>`create_drive_folder`</sub> | <sub>Core</sub> | <sub>Create empty folders in Drive or shared drives</sub> |
@@ -1020,7 +1055,7 @@ uv run pytest
 
 ### OAuth 2.1 Support (Multi-User Bearer Token Authentication)
 
-The server includes OAuth 2.1 support for bearer token authentication, enabling multi-user session management. **OAuth 2.1 automatically reuses your existing `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` credentials** - no additional configuration needed!
+The server includes OAuth 2.1 support for bearer token authentication, enabling multi-user session management. **OAuth 2.1 automatically reuses your existing `GOOGLE_OAUTH_CLIENT_ID` and, for confidential clients, `GOOGLE_OAUTH_CLIENT_SECRET` credentials** - no additional Google-side configuration needed. Public PKCE clients are also supported: if you omit `GOOGLE_OAUTH_CLIENT_SECRET`, set `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` explicitly.
 
 **When to use OAuth 2.1:**
 - Multiple users accessing the same MCP server instance
@@ -1054,7 +1089,7 @@ If `MCP_ENABLE_OAUTH21` is not set to `true`, the server will use legacy authent
 
 FastMCP ships a native `GoogleProvider` that we now rely on directly. It solves the two tricky parts of using Google OAuth with MCP clients:
 
-1.  **Dynamic Client Registration**: Google still doesn't support OAuth 2.1 DCR, but the FastMCP provider exposes the full DCR surface and forwards registrations to Google using your fixed credentials. MCP clients register as usual and the provider hands them your Google client ID/secret under the hood.
+1.  **Dynamic Client Registration**: Google still doesn't support OAuth 2.1 DCR, but the FastMCP provider exposes the full DCR surface and forwards registrations to Google using your fixed credentials. MCP clients register as usual and the provider hands them your Google client ID and, when configured, client secret under the hood.
 
 2.  **CORS & Browser Compatibility**: The provider includes an OAuth proxy that serves all discovery, authorization, and token endpoints with proper CORS headers. We no longer maintain custom `/oauth2/*` routes—the provider handles the upstream exchanges securely and advertises the correct metadata to clients.
 
@@ -1143,7 +1178,7 @@ export WORKSPACE_MCP_OAUTH_PROXY_VALKEY_PORT=6379
 | `WORKSPACE_MCP_OAUTH_PROXY_VALKEY_REQUEST_TIMEOUT_MS` | 5000 | Request timeout for remote hosts |
 | `WORKSPACE_MCP_OAUTH_PROXY_VALKEY_CONNECTION_TIMEOUT_MS` | 10000 | Connection timeout for remote hosts |
 
-**Encryption:** Disk and Valkey storage are encrypted with Fernet. The encryption key is derived from `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` if set, otherwise from `GOOGLE_OAUTH_CLIENT_SECRET`.
+**Encryption:** Disk and Valkey storage are encrypted with Fernet. The encryption key is derived from `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY` if set, otherwise from `GOOGLE_OAUTH_CLIENT_SECRET`. Public OAuth 2.1 client setups without a client secret must set `FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY`.
 
 </details>
 
@@ -1174,7 +1209,7 @@ uv run main.py --transport streamable-http
 
 **Requirements:**
 - Must be used with `MCP_ENABLE_OAUTH21=true`
-- OAuth credentials still required for token validation (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`)
+- OAuth client ID still required for token validation; client secret is optional for public clients (`GOOGLE_OAUTH_CLIENT_ID`, optional `GOOGLE_OAUTH_CLIENT_SECRET`)
 - External system must obtain valid Google OAuth access tokens (ya29.*)
 - Each tool call request must include valid bearer token
 
@@ -1263,7 +1298,13 @@ uv run main.py --transport streamable-http
 
 # Then add to Claude Code
 claude mcp add --transport http workspace-mcp http://localhost:8000/mcp
+
+# Optional: install the bundled Claude skill for better Workspace tool routing
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/skills/managing-google-workspace" ~/.claude/skills/managing-google-workspace
 ```
+
+Or copy `skills/managing-google-workspace` into `~/.claude/skills/managing-google-workspace` if you prefer not to symlink it.
 </details>
 
 #### Reverse Proxy Setup

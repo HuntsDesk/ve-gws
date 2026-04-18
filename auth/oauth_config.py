@@ -81,7 +81,6 @@ class OAuthConfig:
                 "Set GOOGLE_SERVICE_ACCOUNT_KEY_FILE or GOOGLE_SERVICE_ACCOUNT_KEY_JSON, "
                 "but not MCP_ENABLE_OAUTH21=true."
             )
-
         # Transport mode (will be set at runtime)
         self._transport_mode = "stdio"  # Default
 
@@ -135,9 +134,16 @@ class OAuthConfig:
             )
 
         _set_if_absent("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID", self.client_id)
-        _set_if_absent("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET", self.client_secret)
+        if self.client_secret:
+            _set_if_absent(
+                "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET", self.client_secret
+            )
         _set_if_absent("FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL", self.get_oauth_base_url())
         _set_if_absent("FASTMCP_SERVER_AUTH_GOOGLE_REDIRECT_PATH", self.redirect_path)
+
+    def is_public_client(self) -> bool:
+        """Return True when only a client_id is configured (no client_secret)."""
+        return bool(self.client_id and not self.client_secret)
 
     def get_redirect_uris(self) -> List[str]:
         """
@@ -194,7 +200,7 @@ class OAuthConfig:
         Returns:
             True if OAuth client credentials are available
         """
-        return bool(self.client_id and self.client_secret)
+        return bool(self.client_id)
 
     def get_oauth_base_url(self) -> str:
         """
@@ -237,6 +243,8 @@ class OAuthConfig:
             "redirect_uri": self.redirect_uri,
             "redirect_path": self.redirect_path,
             "client_configured": bool(self.client_id),
+            "client_secret_configured": bool(self.client_secret),
+            "public_client": self.is_public_client(),
             "oauth21_enabled": self.oauth21_enabled,
             "external_oauth21_provider": self.external_oauth21_provider,
             "pkce_required": self.pkce_required,
@@ -364,10 +372,11 @@ class OAuthConfig:
             "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",
             "response_types_supported": ["code", "token"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": [
-                "client_secret_post",
-                "client_secret_basic",
-            ],
+            "token_endpoint_auth_methods_supported": (
+                ["none"]
+                if self.is_public_client()
+                else ["client_secret_post", "client_secret_basic"]
+            ),
             "code_challenge_methods_supported": self.supported_code_challenge_methods,
         }
 

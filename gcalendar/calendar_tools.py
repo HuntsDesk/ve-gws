@@ -1903,6 +1903,7 @@ async def _create_focus_time_event_impl(
     end_time: str,
     calendar_id: str = "primary",
     summary: Optional[str] = None,
+    description: Optional[str] = None,
     auto_decline_mode: Optional[str] = None,
     decline_message: Optional[str] = None,
     chat_status: Optional[str] = None,
@@ -1937,6 +1938,8 @@ async def _create_focus_time_event_impl(
         "focusTimeProperties": focus_time_props,
         "transparency": "opaque",
     }
+    if description:
+        event_body["description"] = description
     if recurrence:
         event_body["recurrence"] = recurrence
 
@@ -2067,6 +2070,7 @@ async def _update_focus_time_event_impl(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     summary: Optional[str] = None,
+    description: Optional[str] = None,
     auto_decline_mode: Optional[str] = None,
     decline_message: Optional[str] = None,
     chat_status: Optional[str] = None,
@@ -2092,6 +2096,8 @@ async def _update_focus_time_event_impl(
 
     if summary is not None:
         patch_body["summary"] = summary
+    if description is not None:
+        patch_body["description"] = description
     if start_time is not None:
         patch_body["start"] = _focus_time_time_entry(
             start_time, is_end=False, timezone=timezone
@@ -2214,6 +2220,7 @@ async def manage_focus_time(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     summary: Optional[str] = None,
+    description: Optional[str] = None,
     auto_decline_mode: Optional[str] = None,
     decline_message: Optional[str] = None,
     chat_status: Optional[str] = None,
@@ -2236,6 +2243,7 @@ async def manage_focus_time(
         start_time (Optional[str]): Start date/time. Use 'YYYY-MM-DD' for full-day or RFC3339 for partial-day (e.g., '2024-04-05T09:00:00Z'). Date-only values are auto-converted to dateTime (midnight-to-midnight). Required for create.
         end_time (Optional[str]): End date/time (exclusive). Same format as start_time. For a single full day on April 5, use start_time='2026-04-05' and end_time='2026-04-06'. Required for create.
         summary (Optional[str]): Display text on the calendar. Defaults to "Focus Time".
+        description (Optional[str]): Event description. Useful for adding context about what the focus time is for.
         auto_decline_mode (Optional[str]): How to handle conflicting invitations. One of: "declineAllConflictingInvitations" (default), "declineOnlyNewConflictingInvitations", "declineNone".
         decline_message (Optional[str]): Message included when auto-declining invitations.
         chat_status (Optional[str]): Google Chat status during the focus time. Supports "doNotDisturb" (default) and "available".
@@ -2261,6 +2269,7 @@ async def manage_focus_time(
             end_time=end_time,
             calendar_id=calendar_id,
             summary=summary,
+            description=description,
             auto_decline_mode=auto_decline_mode,
             decline_message=decline_message,
             chat_status=chat_status,
@@ -2288,6 +2297,7 @@ async def manage_focus_time(
             start_time=start_time,
             end_time=end_time,
             summary=summary,
+            description=description,
             auto_decline_mode=auto_decline_mode,
             decline_message=decline_message,
             chat_status=chat_status,

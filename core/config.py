@@ -19,6 +19,7 @@ from auth.oauth_config import (
 # Server configuration
 WORKSPACE_MCP_PORT = int(os.getenv("PORT", os.getenv("WORKSPACE_MCP_PORT", 8000)))
 WORKSPACE_MCP_BASE_URI = os.getenv("WORKSPACE_MCP_BASE_URI", "http://localhost")
+WORKSPACE_EXTERNAL_URL = os.getenv("WORKSPACE_EXTERNAL_URL")
 
 # Disable USER_GOOGLE_EMAIL in OAuth 2.1 multi-user mode
 USER_GOOGLE_EMAIL = (
@@ -29,6 +30,7 @@ USER_GOOGLE_EMAIL = (
 __all__ = [
     "WORKSPACE_MCP_PORT",
     "WORKSPACE_MCP_BASE_URI",
+    "WORKSPACE_EXTERNAL_URL",
     "USER_GOOGLE_EMAIL",
     "get_oauth_base_url",
     "get_oauth_redirect_uri",

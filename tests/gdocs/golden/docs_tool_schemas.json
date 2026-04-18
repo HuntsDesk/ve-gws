@@ -2020,9 +2020,11 @@
     "additionalProperties": false,
     "properties": {
       "document_id": {
+        "description": "ID of the document to update",
         "type": "string"
       },
       "operations": {
+        "description": "List of operation dicts. Each operation MUST have a 'type' field.\n        All operations accept an optional 'tab_id' to target a specific tab.",
         "items": {
           "discriminator": {
             "mapping": {
@@ -2147,6 +2149,7 @@
         "type": "array"
       },
       "user_google_email": {
+        "description": "User's Google email address",
         "type": "string"
       }
     },
@@ -2162,41 +2165,51 @@
     "properties": {
       "background_color": {
         "default": null,
+        "description": "Background/highlight color (#RRGGBB)",
         "type": "string"
       },
       "baseline_offset": {
         "default": null,
+        "description": "One of NONE, SUPERSCRIPT, SUBSCRIPT",
         "type": "string"
       },
       "bold": {
         "default": null,
+        "description": "Whether to make text bold (True/False/None to leave unchanged)",
         "type": "boolean"
       },
       "clear_link": {
         "default": null,
+        "description": "Remove hyperlink from the target range",
         "type": "boolean"
       },
       "document_id": {
+        "description": "ID of the document to update",
         "type": "string"
       },
       "end_index": {
         "default": null,
+        "description": "End position for text replacement/formatting (if not provided with text, text is inserted)",
         "type": "integer"
       },
       "end_of_segment": {
         "default": false,
+        "description": "Insert text at the end of the targeted segment instead of start_index",
         "type": "boolean"
       },
       "font_family": {
         "default": null,
+        "description": "Font family name (e.g., \"Arial\", \"Times New Roman\")",
         "type": "string"
       },
       "font_size": {
         "default": null,
+        "description": "Font size in points",
         "type": "integer"
       },
       "font_weight": {
         "default": null,
+        "description": "Font weight (100-900 in steps of 100; requires font_family)",
         "type": "integer"
       },
       "format_as_markdown": {
@@ -2205,44 +2218,55 @@
       },
       "italic": {
         "default": null,
+        "description": "Whether to make text italic (True/False/None to leave unchanged)",
         "type": "boolean"
       },
       "link_url": {
         "default": null,
+        "description": "Hyperlink URL (http/https)",
         "type": "string"
       },
       "segment_id": {
         "default": null,
+        "description": "Optional header/footer/footnote segment ID to target",
         "type": "string"
       },
       "small_caps": {
         "default": null,
+        "description": "Whether to apply small caps",
         "type": "boolean"
       },
       "start_index": {
+        "description": "Start position for operation using Docs API indices from\ninspect_doc_structure. For the main body, 0 is also accepted as an\nalias for the first writable position.",
         "type": "integer"
       },
       "strikethrough": {
         "default": null,
+        "description": "Whether to strike through text (True/False/None to leave unchanged)",
         "type": "boolean"
       },
       "tab_id": {
         "default": null,
+        "description": "Optional document tab ID to target",
         "type": "string"
       },
       "text": {
         "default": null,
+        "description": "New text to insert or replace with (optional - can format existing text without changing it)",
         "type": "string"
       },
       "text_color": {
         "default": null,
+        "description": "Foreground text color (#RRGGBB)",
         "type": "string"
       },
       "underline": {
         "default": null,
+        "description": "Whether to underline text (True/False/None to leave unchanged)",
         "type": "boolean"
       },
       "user_google_email": {
+        "description": "User's Google email address",
         "type": "string"
       }
     },

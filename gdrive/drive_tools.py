@@ -7,27 +7,35 @@ This module provides MCP tools for interacting with Google Drive API.
 import asyncio
 import logging
 import io
-import httpx
 import base64
-import ipaddress
-import socket
-from contextlib import asynccontextmanager
 
-from typing import AsyncIterator, Optional, List, Dict, Any
-from tempfile import NamedTemporaryFile
-from urllib.parse import urljoin, urlparse, urlunparse
+from typing import Optional, List, Dict, Any, Callable, Awaitable, BinaryIO
+from tempfile import NamedTemporaryFile, SpooledTemporaryFile
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 from pathlib import Path
 
+import httpx
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 from auth.service_decorator import require_google_service
 from auth.oauth_config import is_stateless_mode
 from core.attachment_storage import get_attachment_storage, get_attachment_url
-from core.utils import extract_office_xml_text, handle_http_errors, validate_file_path
+from core.utils import (
+    IMAGE_MIME_TYPES,
+    encode_image_content,
+    extract_office_xml_text,
+    extract_pdf_text,
+    handle_http_errors,
+    validate_file_path,
+)
 from core.server import server
 from core.config import get_transport_mode
+from core.http_utils import (
+    redact_url as _redact_url,
+    ssrf_safe_stream as _ssrf_safe_stream,
+)
 from gdrive.drive_helpers import (
     DRIVE_QUERY_PATTERNS,
     FOLDER_MIME_TYPE,
@@ -50,6 +58,74 @@ UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB (Google recommended minimum)
 MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB safety limit for URL downloads
 
 
+async def _stream_url_with_validation(
+    url: str, write_chunk: Optional[Callable[[bytes], Awaitable[None]]] = None
+) -> tuple[int, Optional[str]]:
+    """Stream a remote file with shared status and size validation."""
+    total_bytes = 0
+
+    redacted_url = _redact_url(url)
+
+    async with _ssrf_safe_stream(url) as resp:
+        if resp.status_code != 200:
+            request = getattr(resp, "request", None)
+            if request is None:
+                parsed_url = urlparse(url)
+                request = httpx.Request(
+                    "GET",
+                    f"{parsed_url.scheme}://{redacted_url}",
+                )
+            raise httpx.HTTPStatusError(
+                f"Failed to fetch file from URL: {redacted_url} (status {resp.status_code})",
+                request=request,
+                response=resp,
+            )
+
+        content_type = resp.headers.get("Content-Type")
+        async for chunk in resp.aiter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
+            total_bytes += len(chunk)
+            if total_bytes > MAX_DOWNLOAD_BYTES:
+                raise ValueError(
+                    f"Download from {redacted_url} exceeded {MAX_DOWNLOAD_BYTES} byte limit "
+                    f"({total_bytes} bytes)"
+                )
+            if write_chunk is not None:
+                await write_chunk(chunk)
+
+    return total_bytes, content_type
+
+
+async def _download_url_to_bytes(
+    url: str,
+) -> tuple[BinaryIO, Optional[str]]:
+    """Download a remote file into a spooled temporary file with bounded streaming."""
+    spool = SpooledTemporaryFile(max_size=UPLOAD_CHUNK_SIZE_BYTES)
+
+    try:
+
+        async def _collect(chunk: bytes) -> None:
+            await asyncio.to_thread(spool.write, chunk)
+
+        _total_bytes, content_type = await _stream_url_with_validation(url, _collect)
+        await asyncio.to_thread(spool.seek, 0)
+        return spool, content_type
+    except Exception:
+        spool.close()
+        raise
+
+
+async def _get_file_size(file_obj: BinaryIO) -> int:
+    """Measure a possibly spooled file off the event loop and restore position."""
+
+    def _measure_size() -> int:
+        file_obj.seek(0, io.SEEK_END)
+        size = file_obj.tell()
+        file_obj.seek(0)
+        return size
+
+    return await asyncio.to_thread(_measure_size)
+
+
 @server.tool()
 @handle_http_errors("search_drive_files", is_read_only=True, service_type="drive")
 @require_google_service("drive", "drive_read")
@@ -64,6 +140,7 @@ async def search_drive_files(
     corpora: Optional[str] = None,
     file_type: Optional[str] = None,
     detailed: bool = True,
+    order_by: Optional[str] = None,
 ) -> str:
     """
     Searches for files and folders within a user's Google Drive, including shared drives.
@@ -71,6 +148,10 @@ async def search_drive_files(
     Args:
         user_google_email (str): The user's Google email address. Required.
         query (str): The search query string. Supports Google Drive search operators.
+                     NOTE: Owner-based queries ('user@example.com' in owners) DO NOT WORK in Shared Drives
+                     because files are owned by the shared drive itself, not individual users.
+                     For recent files by a specific user in Shared Drives, search by modifiedTime
+                     and use order_by='modifiedTime desc' instead.
         page_size (int): The maximum number of files to return. Defaults to 10.
         page_token (Optional[str]): Page token from a previous response's nextPageToken to retrieve the next page of results.
         drive_id (Optional[str]): ID of the shared drive to search. If None, behavior depends on `corpora` and `include_items_from_all_drives`.
@@ -84,6 +165,11 @@ async def search_drive_files(
                                    'script', 'site', 'jam'/'jamboard') or any raw MIME type
                                    string (e.g. 'application/pdf'). Defaults to None (all types).
         detailed (bool): Whether to include size, modified time, and link in results. Defaults to True.
+        order_by (Optional[str]): Sort order. Comma-separated list of sort keys with optional 'desc' modifier.
+                                  Valid keys: 'createdTime', 'folder', 'modifiedByMeTime', 'modifiedTime',
+                                  'name', 'name_natural', 'quotaBytesUsed', 'recency', 'sharedWithMeTime',
+                                  'starred', 'viewedByMeTime'. Example: 'modifiedTime desc' or 'folder,modifiedTime desc,name'.
+                                  Defaults to None (Drive API default ordering).
 
     Returns:
         str: A formatted list of found files/folders with their details (ID, name, type, and optionally size, modified time, link).
@@ -123,6 +209,7 @@ async def search_drive_files(
         corpora=corpora,
         page_token=page_token,
         detailed=detailed,
+        order_by=order_by,
     )
 
     results = await asyncio.to_thread(service.files().list(**list_params).execute)
@@ -163,6 +250,9 @@ async def get_drive_file_content(
     • Native Google Docs, Sheets, Slides → exported as text / CSV.
     • Office files (.docx, .xlsx, .pptx) → unzipped & parsed with std-lib to
       extract readable text.
+    • PDFs → text extracted with pypdf when possible; scanned/image-only PDFs
+      fall back to a download hint.
+    • Images → returned as base64 with MIME metadata for multimodal clients.
     • Any other file → downloaded; tries UTF-8 decode, else notes binary.
 
     Args:
@@ -210,7 +300,10 @@ async def get_drive_file_content(
     }
 
     if mime_type in office_mime_types:
-        office_text = extract_office_xml_text(file_content_bytes, mime_type)
+        # Offload Office XML extraction to a thread to avoid blocking the event loop
+        office_text = await asyncio.to_thread(
+            extract_office_xml_text, file_content_bytes, mime_type
+        )
         if office_text:
             body_text = office_text
         else:
@@ -222,6 +315,19 @@ async def get_drive_file_content(
                     f"[Binary or unsupported text encoding for mimeType '{mime_type}' - "
                     f"{len(file_content_bytes)} bytes]"
                 )
+    elif mime_type == "application/pdf":
+        # Offload PDF text extraction to a thread to avoid blocking the event loop
+        pdf_text = await asyncio.to_thread(extract_pdf_text, file_content_bytes)
+        if pdf_text:
+            body_text = pdf_text
+        else:
+            body_text = (
+                f"[Could not extract text from PDF ({len(file_content_bytes)} bytes) "
+                f"- the file may be scanned/image-only. "
+                f"Use get_drive_file_download_url to get a direct download link instead.]"
+            )
+    elif mime_type in IMAGE_MIME_TYPES:
+        body_text = encode_image_content(file_content_bytes, mime_type)
     else:
         # For non-Office files (including Google native files), try UTF-8 decode directly
         try:
@@ -443,6 +549,7 @@ async def list_drive_items(
     corpora: Optional[str] = None,
     file_type: Optional[str] = None,
     detailed: bool = True,
+    order_by: Optional[str] = None,
 ) -> str:
     """
     Lists files and folders, supporting shared drives.
@@ -463,6 +570,11 @@ async def list_drive_items(
                                    'script', 'site', 'jam'/'jamboard') or any raw MIME type
                                    string (e.g. 'application/pdf'). Defaults to None (all types).
         detailed (bool): Whether to include size, modified time, and link in results. Defaults to True.
+        order_by (Optional[str]): Sort order. Comma-separated list of sort keys with optional 'desc' modifier.
+                                  Valid keys: 'createdTime', 'folder', 'modifiedByMeTime', 'modifiedTime',
+                                  'name', 'name_natural', 'quotaBytesUsed', 'recency', 'sharedWithMeTime',
+                                  'starred', 'viewedByMeTime'. Example: 'modifiedTime desc' or 'folder,modifiedTime desc,name'.
+                                  Defaults to None (Drive API default ordering).
 
     Returns:
         str: A formatted list of files/folders in the specified folder.
@@ -488,6 +600,7 @@ async def list_drive_items(
         corpora=corpora,
         page_token=page_token,
         detailed=detailed,
+        order_by=order_by,
     )
 
     results = await asyncio.to_thread(service.files().list(**list_params).execute)
@@ -694,62 +807,51 @@ async def create_drive_file(
         elif parsed_url.scheme in ("http", "https"):
             # when running in stateless mode, deployment may not have access to local file system
             if is_stateless_mode():
-                resp = await _ssrf_safe_fetch(fileUrl)
-                if resp.status_code != 200:
-                    raise Exception(
-                        f"Failed to fetch file from URL: {fileUrl} (status {resp.status_code})"
+                with SpooledTemporaryFile(max_size=UPLOAD_CHUNK_SIZE_BYTES) as spool:
+
+                    async def _write_spool(chunk: bytes) -> None:
+                        await asyncio.to_thread(spool.write, chunk)
+
+                    _total, content_type = await _stream_url_with_validation(
+                        fileUrl, _write_spool
                     )
-                file_data = resp.content
-                # Try to get MIME type from Content-Type header
-                content_type = resp.headers.get("Content-Type")
-                if content_type and content_type != "application/octet-stream":
-                    mime_type = content_type
-                    file_metadata["mimeType"] = content_type
-                    logger.info(
-                        f"[create_drive_file] Using MIME type from Content-Type header: {content_type}"
+                    await asyncio.to_thread(spool.seek, 0)
+
+                    # Try to get MIME type from Content-Type header
+                    if content_type and content_type != "application/octet-stream":
+                        mime_type = content_type
+                        file_metadata["mimeType"] = content_type
+                        logger.info(
+                            f"[create_drive_file] Using MIME type from Content-Type header: {content_type}"
+                        )
+
+                    media = MediaIoBaseUpload(
+                        spool,
+                        mimetype=mime_type,
+                        resumable=True,
+                        chunksize=UPLOAD_CHUNK_SIZE_BYTES,
                     )
 
-                media = MediaIoBaseUpload(
-                    io.BytesIO(file_data),
-                    mimetype=mime_type,
-                    resumable=True,
-                    chunksize=UPLOAD_CHUNK_SIZE_BYTES,
-                )
-
-                created_file = await asyncio.to_thread(
-                    service.files()
-                    .create(
-                        body=file_metadata,
-                        media_body=media,
-                        fields="id, name, webViewLink",
-                        supportsAllDrives=True,
+                    created_file = await asyncio.to_thread(
+                        service.files()
+                        .create(
+                            body=file_metadata,
+                            media_body=media,
+                            fields="id, name, webViewLink",
+                            supportsAllDrives=True,
+                        )
+                        .execute
                     )
-                    .execute
-                )
             else:
                 # Stream download to temp file with SSRF protection, then upload
                 with NamedTemporaryFile() as temp_file:
-                    total_bytes = 0
-                    content_type = None
 
-                    async with _ssrf_safe_stream(fileUrl) as resp:
-                        if resp.status_code != 200:
-                            raise Exception(
-                                f"Failed to fetch file from URL: {fileUrl} "
-                                f"(status {resp.status_code})"
-                            )
+                    async def _write_chunk(chunk: bytes) -> None:
+                        await asyncio.to_thread(temp_file.write, chunk)
 
-                        content_type = resp.headers.get("Content-Type")
-
-                        async for chunk in resp.aiter_bytes(
-                            chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES
-                        ):
-                            total_bytes += len(chunk)
-                            if total_bytes > MAX_DOWNLOAD_BYTES:
-                                raise Exception(
-                                    f"Download exceeded {MAX_DOWNLOAD_BYTES} byte limit"
-                                )
-                            await asyncio.to_thread(temp_file.write, chunk)
+                    total_bytes, content_type = await _stream_url_with_validation(
+                        fileUrl, _write_chunk
+                    )
 
                     logger.info(
                         f"[create_drive_file] Downloaded {total_bytes} bytes "
@@ -831,287 +933,6 @@ GOOGLE_DOCS_IMPORT_FORMATS = {
 }
 
 GOOGLE_DOCS_MIME_TYPE = "application/vnd.google-apps.document"
-
-
-def _resolve_and_validate_host(hostname: str) -> list[str]:
-    """
-    Resolve a hostname to IP addresses and validate none are private/internal.
-
-    Uses getaddrinfo to handle both IPv4 and IPv6. Fails closed on DNS errors.
-
-    Returns:
-        list[str]: Validated resolved IP address strings.
-
-    Raises:
-        ValueError: If hostname resolves to private/internal IPs or DNS fails.
-    """
-    if not hostname:
-        raise ValueError("Invalid URL: no hostname")
-
-    # Block localhost variants
-    if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        raise ValueError("URLs pointing to localhost are not allowed")
-
-    # Resolve hostname using getaddrinfo (handles both IPv4 and IPv6)
-    try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror as e:
-        raise ValueError(
-            f"Cannot resolve hostname '{hostname}': {e}. "
-            "Refusing request (fail-closed)."
-        )
-
-    if not addr_infos:
-        raise ValueError(f"No addresses found for hostname: {hostname}")
-
-    resolved_ips: list[str] = []
-    seen_ips: set[str] = set()
-    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
-        ip_str = sockaddr[0]
-        ip = ipaddress.ip_address(ip_str)
-        if not ip.is_global:
-            raise ValueError(
-                f"URLs pointing to private/internal networks are not allowed: "
-                f"{hostname} resolves to {ip_str}"
-            )
-        if ip_str not in seen_ips:
-            seen_ips.add(ip_str)
-            resolved_ips.append(ip_str)
-
-    return resolved_ips
-
-
-def _validate_url_not_internal(url: str) -> list[str]:
-    """
-    Validate that a URL doesn't point to internal/private networks (SSRF protection).
-
-    Returns:
-        list[str]: Validated resolved IP addresses for the hostname.
-
-    Raises:
-        ValueError: If URL points to localhost or private IP ranges.
-    """
-    parsed = urlparse(url)
-    return _resolve_and_validate_host(parsed.hostname)
-
-
-def _format_host_header(hostname: str, scheme: str, port: Optional[int]) -> str:
-    """Format the Host header value for IPv4/IPv6 hostnames."""
-    host_value = hostname
-    if ":" in host_value and not host_value.startswith("["):
-        host_value = f"[{host_value}]"
-
-    is_default_port = (scheme == "http" and (port is None or port == 80)) or (
-        scheme == "https" and (port is None or port == 443)
-    )
-    if not is_default_port and port is not None:
-        host_value = f"{host_value}:{port}"
-    return host_value
-
-
-def _build_pinned_url(parsed_url, ip_address_str: str) -> str:
-    """Build a URL that targets a resolved IP while preserving path/query."""
-    pinned_host = ip_address_str
-    if ":" in pinned_host and not pinned_host.startswith("["):
-        pinned_host = f"[{pinned_host}]"
-
-    userinfo = ""
-    if parsed_url.username is not None:
-        userinfo = parsed_url.username
-        if parsed_url.password is not None:
-            userinfo += f":{parsed_url.password}"
-        userinfo += "@"
-
-    port_part = f":{parsed_url.port}" if parsed_url.port is not None else ""
-    netloc = f"{userinfo}{pinned_host}{port_part}"
-
-    path = parsed_url.path or "/"
-    return urlunparse(
-        (
-            parsed_url.scheme,
-            netloc,
-            path,
-            parsed_url.params,
-            parsed_url.query,
-            parsed_url.fragment,
-        )
-    )
-
-
-async def _fetch_url_with_pinned_ip(url: str) -> httpx.Response:
-    """
-    Fetch URL content by connecting to a validated, pre-resolved IP address.
-
-    This prevents DNS rebinding between validation and the outbound connection.
-    """
-    parsed_url = urlparse(url)
-    if parsed_url.scheme not in ("http", "https"):
-        raise ValueError(f"Only http:// and https:// are supported: {url}")
-    if not parsed_url.hostname:
-        raise ValueError(f"Invalid URL: missing hostname ({url})")
-
-    resolved_ips = _validate_url_not_internal(url)
-    host_header = _format_host_header(
-        parsed_url.hostname, parsed_url.scheme, parsed_url.port
-    )
-
-    last_error: Optional[Exception] = None
-    for resolved_ip in resolved_ips:
-        pinned_url = _build_pinned_url(parsed_url, resolved_ip)
-        try:
-            async with httpx.AsyncClient(
-                follow_redirects=False, trust_env=False
-            ) as client:
-                request = client.build_request(
-                    "GET",
-                    pinned_url,
-                    headers={"Host": host_header},
-                    extensions={"sni_hostname": parsed_url.hostname},
-                )
-                return await client.send(request)
-        except httpx.HTTPError as exc:
-            last_error = exc
-            logger.warning(
-                f"[ssrf_safe_fetch] Failed request via resolved IP {resolved_ip} for host "
-                f"{parsed_url.hostname}: {exc}"
-            )
-
-    raise Exception(
-        f"Failed to fetch URL after trying {len(resolved_ips)} validated IP(s): {url}"
-    ) from last_error
-
-
-async def _ssrf_safe_fetch(url: str, *, stream: bool = False) -> httpx.Response:
-    """
-    Fetch a URL with SSRF protection that covers redirects and DNS rebinding.
-
-    Validates the initial URL and every redirect target against private/internal
-    networks. Disables automatic redirect following and handles redirects manually.
-
-    Args:
-        url: The URL to fetch.
-        stream: If True, returns a streaming response (caller must manage context).
-
-    Returns:
-        httpx.Response with the final response content.
-
-    Raises:
-        ValueError: If any URL in the redirect chain points to a private network.
-        Exception: If the HTTP request fails.
-    """
-    if stream:
-        raise ValueError("Streaming mode is not supported by _ssrf_safe_fetch.")
-
-    max_redirects = 10
-    current_url = url
-
-    for _ in range(max_redirects):
-        resp = await _fetch_url_with_pinned_ip(current_url)
-
-        if resp.status_code in (301, 302, 303, 307, 308):
-            location = resp.headers.get("location")
-            if not location:
-                raise Exception(f"Redirect with no Location header from {current_url}")
-
-            # Resolve relative redirects against the current URL
-            location = urljoin(current_url, location)
-
-            redirect_parsed = urlparse(location)
-            if redirect_parsed.scheme not in ("http", "https"):
-                raise ValueError(
-                    f"Redirect to disallowed scheme: {redirect_parsed.scheme}"
-                )
-
-            current_url = location
-            continue
-
-        return resp
-
-    raise Exception(f"Too many redirects (max {max_redirects}) fetching {url}")
-
-
-@asynccontextmanager
-async def _ssrf_safe_stream(url: str) -> AsyncIterator[httpx.Response]:
-    """
-    SSRF-safe streaming fetch: validates each redirect target against private
-    networks, then streams the final response body without buffering it all
-    in memory.
-
-    Usage::
-
-        async with _ssrf_safe_stream(file_url) as resp:
-            async for chunk in resp.aiter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
-                ...
-    """
-    max_redirects = 10
-    current_url = url
-
-    # Resolve redirects manually so every hop is SSRF-validated
-    for _ in range(max_redirects):
-        parsed = urlparse(current_url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"Only http:// and https:// are supported: {current_url}")
-        if not parsed.hostname:
-            raise ValueError(f"Invalid URL: missing hostname ({current_url})")
-
-        resolved_ips = _validate_url_not_internal(current_url)
-        host_header = _format_host_header(parsed.hostname, parsed.scheme, parsed.port)
-
-        last_error: Optional[Exception] = None
-        resp: Optional[httpx.Response] = None
-        for resolved_ip in resolved_ips:
-            pinned_url = _build_pinned_url(parsed, resolved_ip)
-            client = httpx.AsyncClient(follow_redirects=False, trust_env=False)
-            try:
-                request = client.build_request(
-                    "GET",
-                    pinned_url,
-                    headers={"Host": host_header},
-                    extensions={"sni_hostname": parsed.hostname},
-                )
-                resp = await client.send(request, stream=True)
-                break
-            except httpx.HTTPError as exc:
-                last_error = exc
-                await client.aclose()
-                logger.warning(
-                    f"[ssrf_safe_stream] Failed via IP {resolved_ip} for "
-                    f"{parsed.hostname}: {exc}"
-                )
-            except Exception:
-                await client.aclose()
-                raise
-
-        if resp is None:
-            raise Exception(
-                f"Failed to fetch URL after trying {len(resolved_ips)} validated IP(s): "
-                f"{current_url}"
-            ) from last_error
-
-        if resp.status_code in (301, 302, 303, 307, 308):
-            location = resp.headers.get("location")
-            await resp.aclose()
-            await client.aclose()
-            if not location:
-                raise Exception(f"Redirect with no Location header from {current_url}")
-            location = urljoin(current_url, location)
-            redirect_parsed = urlparse(location)
-            if redirect_parsed.scheme not in ("http", "https"):
-                raise ValueError(
-                    f"Redirect to disallowed scheme: {redirect_parsed.scheme}"
-                )
-            current_url = location
-            continue
-
-        # Non-redirect — yield the streaming response
-        try:
-            yield resp
-        finally:
-            await resp.aclose()
-            await client.aclose()
-        return
-
-    raise Exception(f"Too many redirects (max {max_redirects}) fetching {url}")
 
 
 def _detect_source_format(file_name: str, content: Optional[str] = None) -> str:
@@ -1218,6 +1039,8 @@ async def import_to_google_doc(
     }
 
     file_data: bytes
+    remote_file_data: Optional[BinaryIO] = None
+    remote_content_type: Optional[str] = None
 
     # Handle content (string input for text formats)
     if content is not None:
@@ -1266,47 +1089,76 @@ async def import_to_google_doc(
             raise ValueError(f"file_url must be http:// or https://, got: {file_url}")
 
         # SSRF protection: block internal/private network URLs and validate redirects
-        resp = await _ssrf_safe_fetch(file_url)
-        if resp.status_code != 200:
-            raise Exception(
-                f"Failed to fetch file from URL: {file_url} (status {resp.status_code})"
-            )
-        file_data = resp.content
-
-        logger.info(
-            f"[import_to_google_doc] Downloaded from URL: {len(file_data)} bytes"
-        )
-
-        # Re-detect format from URL if not specified
-        if not source_format:
-            source_mime_type = _detect_source_format(file_url)
-            logger.info(
-                f"[import_to_google_doc] Re-detected from URL: {source_mime_type}"
-            )
+        remote_file_data, remote_content_type = await _download_url_to_bytes(file_url)
 
     # Upload with conversion
-    media = MediaIoBaseUpload(
-        io.BytesIO(file_data),
-        mimetype=source_mime_type,  # Source format
-        resumable=True,
-        chunksize=UPLOAD_CHUNK_SIZE_BYTES,
-    )
+    if remote_file_data is not None:
+        with remote_file_data:
+            remote_size = await _get_file_size(remote_file_data)
 
-    logger.info(
-        f"[import_to_google_doc] Uploading to Google Drive with conversion: "
-        f"{source_mime_type} → {GOOGLE_DOCS_MIME_TYPE}"
-    )
+            logger.info(
+                f"[import_to_google_doc] Downloaded from URL: {remote_size} bytes"
+            )
 
-    created_file = await asyncio.to_thread(
-        service.files()
-        .create(
-            body=file_metadata,
-            media_body=media,
-            fields="id, name, webViewLink, mimeType",
-            supportsAllDrives=True,
+            # Prefer the Content-Type from the download; fall back to URL-based detection
+            if not source_format:
+                ct_base = (remote_content_type or "").split(";", 1)[0].strip()
+                if ct_base and ct_base != "application/octet-stream":
+                    source_mime_type = ct_base
+                    logger.info(
+                        f"[import_to_google_doc] Using Content-Type from response: {source_mime_type}"
+                    )
+                else:
+                    source_mime_type = _detect_source_format(file_url)
+                    logger.info(
+                        f"[import_to_google_doc] Detected from URL path: {source_mime_type}"
+                    )
+
+            media = MediaIoBaseUpload(
+                remote_file_data,
+                mimetype=source_mime_type,  # Source format
+                resumable=True,
+                chunksize=UPLOAD_CHUNK_SIZE_BYTES,
+            )
+
+            logger.info(
+                f"[import_to_google_doc] Uploading to Google Drive with conversion: "
+                f"{source_mime_type} → {GOOGLE_DOCS_MIME_TYPE}"
+            )
+
+            created_file = await asyncio.to_thread(
+                service.files()
+                .create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields="id, name, webViewLink, mimeType",
+                    supportsAllDrives=True,
+                )
+                .execute
+            )
+    else:
+        media = MediaIoBaseUpload(
+            io.BytesIO(file_data),
+            mimetype=source_mime_type,  # Source format
+            resumable=True,
+            chunksize=UPLOAD_CHUNK_SIZE_BYTES,
         )
-        .execute
-    )
+
+        logger.info(
+            f"[import_to_google_doc] Uploading to Google Drive with conversion: "
+            f"{source_mime_type} → {GOOGLE_DOCS_MIME_TYPE}"
+        )
+
+        created_file = await asyncio.to_thread(
+            service.files()
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields="id, name, webViewLink, mimeType",
+                supportsAllDrives=True,
+            )
+            .execute
+        )
 
     result_mime = created_file.get("mimeType", "unknown")
     if result_mime != GOOGLE_DOCS_MIME_TYPE:

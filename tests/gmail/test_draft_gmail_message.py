@@ -4,13 +4,20 @@ from email.parser import BytesParser
 import os
 import sys
 from unittest.mock import Mock
+from contextlib import asynccontextmanager
 
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+import gmail.gmail_tools as gmail_tools
 from core.utils import UserInputError
-from gmail.gmail_tools import draft_gmail_message
+from gmail.gmail_tools import (
+    draft_gmail_message,
+    send_gmail_message,
+    _resolve_url_attachments,
+    _try_read_local_attachment,
+)
 
 
 def _unwrap(tool):
@@ -75,6 +82,25 @@ def _thread_message(
     return {"payload": payload}
 
 
+class _FakeStreamResponse:
+    def __init__(self, status_code=200, headers=None, chunks=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._chunks = chunks or []
+
+    async def aiter_bytes(self, chunk_size=0):
+        for chunk in self._chunks:
+            yield chunk
+
+
+def _mock_stream_response(response):
+    @asynccontextmanager
+    async def _stream(_url, **_kwargs):
+        yield response
+
+    return _stream
+
+
 def _parse_raw_message(raw_message: str):
     return BytesParser(policy=policy.default).parsebytes(
         base64.urlsafe_b64decode(raw_message)
@@ -134,6 +160,39 @@ async def test_draft_gmail_message_raises_when_no_attachments_are_added(
             attachments=[{"path": str(missing_path)}],
             include_signature=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_draft_gmail_message_surfaces_guidance_for_paths_outside_allowed_dirs(
+    tmp_path, monkeypatch
+):
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+    blocked_dir = tmp_path / "blocked"
+    blocked_dir.mkdir()
+    blocked_path = blocked_dir / "sample.txt"
+    blocked_path.write_text("hello attachment", encoding="utf-8")
+    monkeypatch.setenv("ALLOWED_FILE_DIRS", str(allowed_dir))
+
+    mock_service = Mock()
+    mock_service.users().drafts().create().execute.return_value = {"id": "draft123"}
+
+    with pytest.raises(UserInputError) as exc_info:
+        await _unwrap(draft_gmail_message)(
+            service=mock_service,
+            user_google_email="user@example.com",
+            to="recipient@example.com",
+            subject="Attachment test",
+            body="Please see attached.",
+            attachments=[{"path": str(blocked_path)}],
+            include_signature=False,
+        )
+
+    message = str(exc_info.value)
+    assert "No valid attachments were added" in message
+    assert "permitted directories" in message
+    assert "external mounts such as /run/media may be blocked" in message
+    assert str(blocked_path) in message
 
 
 @pytest.mark.asyncio
@@ -489,3 +548,264 @@ async def test_draft_gmail_message_gracefully_degrades_when_thread_has_no_messag
 
     assert "In-Reply-To:" not in raw_text
     assert "References:" not in raw_text
+
+
+# ---------------------------------------------------------------------------
+# URL-based attachment tests
+# ---------------------------------------------------------------------------
+
+
+def test_try_read_local_attachment_reads_from_storage(tmp_path, monkeypatch):
+    """MCP attachment URLs should be resolved from local storage."""
+    import core.attachment_storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "STORAGE_DIR", tmp_path)
+
+    # Write a fake attachment file matching the naming convention.
+    file_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    (tmp_path / f"report_{file_id[:8]}.pdf").write_bytes(b"%PDF-fake")
+
+    storage = storage_mod.AttachmentStorage()
+    monkeypatch.setattr(storage_mod, "_attachment_storage", storage)
+
+    # Manually register metadata so get_attachment_path works.
+    from datetime import datetime, timedelta
+
+    storage._metadata[file_id] = {
+        "file_path": str(tmp_path / f"report_{file_id[:8]}.pdf"),
+        "filename": "report.pdf",
+        "mime_type": "application/pdf",
+        "size": 9,
+        "created_at": datetime.now(),
+        "expires_at": datetime.now() + timedelta(hours=1),
+    }
+
+    result = _try_read_local_attachment(f"/attachments/{file_id}")
+    assert result is not None
+    data, filename, mime_type = result
+    assert data == b"%PDF-fake"
+    assert filename == "report.pdf"
+    assert mime_type == "application/pdf"
+
+
+def test_try_read_local_attachment_returns_none_for_non_attachment_url():
+    """Non-attachment URLs should return None (fall through to HTTP fetch)."""
+    assert _try_read_local_attachment("https://example.com/file.pdf") is None
+
+
+def test_try_read_local_attachment_rejects_untrusted_origin(tmp_path, monkeypatch):
+    file_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    file_path = tmp_path / "report.pdf"
+    file_path.write_bytes(b"%PDF-fake")
+
+    storage = gmail_tools.get_attachment_storage()
+    monkeypatch.setattr(
+        storage,
+        "get_attachment_metadata",
+        lambda requested_file_id: (
+            {
+                "filename": "report.pdf",
+                "mime_type": "application/pdf",
+            }
+            if requested_file_id == file_id
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        storage,
+        "get_attachment_path",
+        lambda requested_file_id: file_path if requested_file_id == file_id else None,
+    )
+    monkeypatch.delenv("WORKSPACE_EXTERNAL_URL", raising=False)
+
+    result = _try_read_local_attachment(f"https://evil.example/attachments/{file_id}")
+    assert result is None
+
+
+def test_try_read_local_attachment_requires_metadata_without_scan_fallback(
+    tmp_path, monkeypatch
+):
+    file_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    monkeypatch.setattr(gmail_tools, "STORAGE_DIR", tmp_path)
+    (tmp_path / f"report_{file_id[:8]}.pdf").write_bytes(b"%PDF-fake")
+
+    storage = gmail_tools.get_attachment_storage()
+    monkeypatch.setattr(storage, "get_attachment_metadata", lambda _file_id: None)
+    monkeypatch.setattr(storage, "get_attachment_path", lambda _file_id: None)
+
+    result = _try_read_local_attachment(f"/attachments/{file_id}")
+    assert result is None
+
+
+def test_try_read_local_attachment_checks_file_size_before_reading(
+    tmp_path, monkeypatch
+):
+    file_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    file_path = tmp_path / "large.bin"
+    file_path.write_bytes(b"0123456789")
+
+    storage = gmail_tools.get_attachment_storage()
+    monkeypatch.setattr(
+        storage,
+        "get_attachment_metadata",
+        lambda requested_file_id: (
+            {
+                "filename": "large.bin",
+                "mime_type": "application/octet-stream",
+            }
+            if requested_file_id == file_id
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        storage,
+        "get_attachment_path",
+        lambda requested_file_id: file_path if requested_file_id == file_id else None,
+    )
+    monkeypatch.setattr(gmail_tools, "MAX_EMAIL_ATTACHMENT_BYTES", 5)
+
+    with pytest.raises(ValueError, match="Attachment exceeds 5 bytes"):
+        _try_read_local_attachment(f"/attachments/{file_id}")
+
+
+@pytest.mark.asyncio
+async def test_resolve_url_attachments_fetches_external_url(monkeypatch):
+    """External URLs should be fetched via streamed SSRF-safe download."""
+    fake_response = _FakeStreamResponse(
+        200,
+        headers={"content-type": "application/pdf"},
+        chunks=[b"file-", b"bytes"],
+    )
+
+    monkeypatch.setattr(
+        gmail_tools, "ssrf_safe_stream", _mock_stream_response(fake_response)
+    )
+
+    attachments = [{"url": "https://example.com/report.pdf"}]
+    resolved = await _resolve_url_attachments(attachments)
+
+    assert len(resolved) == 1
+    assert resolved[0]["_resolved_bytes"] == b"file-bytes"
+    assert resolved[0]["filename"] == "report.pdf"
+    assert resolved[0]["mime_type"] == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_resolve_url_attachments_preserves_non_url_entries():
+    """Entries with path or content should pass through unchanged."""
+    attachments = [
+        {"path": "/some/file.txt"},
+        {"content": "aGVsbG8=", "filename": "hello.txt"},
+    ]
+    resolved = await _resolve_url_attachments(attachments)
+    assert resolved == attachments
+
+
+@pytest.mark.asyncio
+async def test_resolve_url_attachments_uses_provided_filename(monkeypatch):
+    """User-specified filename should take precedence over URL-derived name."""
+    fake_response = _FakeStreamResponse(
+        200,
+        headers={"content-type": "text/plain"},
+        chunks=[b"data"],
+    )
+
+    monkeypatch.setattr(
+        gmail_tools, "ssrf_safe_stream", _mock_stream_response(fake_response)
+    )
+
+    attachments = [{"url": "https://example.com/abc123", "filename": "my_report.txt"}]
+    resolved = await _resolve_url_attachments(attachments)
+    assert resolved[0]["filename"] == "my_report.txt"
+
+
+@pytest.mark.asyncio
+async def test_resolve_url_attachments_rejects_oversized(monkeypatch):
+    """Attachments exceeding 25 MB should be skipped (passed through for error)."""
+    big_data = b"x" * (26 * 1024 * 1024)
+    fake_response = _FakeStreamResponse(
+        200,
+        headers={"content-type": "application/octet-stream"},
+        chunks=[big_data],
+    )
+
+    monkeypatch.setattr(
+        gmail_tools, "ssrf_safe_stream", _mock_stream_response(fake_response)
+    )
+
+    attachments = [{"url": "https://example.com/huge.bin"}]
+    resolved = await _resolve_url_attachments(attachments)
+    # Should pass through the original dict (no _resolved_bytes).
+    assert "_resolved_bytes" not in resolved[0]
+    assert resolved[0]["url"] == "https://example.com/huge.bin"
+
+
+@pytest.mark.asyncio
+async def test_draft_gmail_message_with_url_attachment(monkeypatch):
+    """End-to-end: draft_gmail_message should accept a URL attachment."""
+    fake_response = _FakeStreamResponse(
+        200,
+        headers={"content-type": "application/pdf"},
+        chunks=[b"pdf-content-here"],
+    )
+
+    monkeypatch.setattr(
+        gmail_tools, "ssrf_safe_stream", _mock_stream_response(fake_response)
+    )
+
+    mock_service = Mock()
+    mock_service.users().drafts().create().execute.return_value = {"id": "draft_url"}
+
+    result = await _unwrap(draft_gmail_message)(
+        service=mock_service,
+        user_google_email="user@example.com",
+        to="recipient@example.com",
+        subject="URL attachment test",
+        body="See attached from URL.",
+        attachments=[{"url": "https://example.com/doc.pdf", "filename": "doc.pdf"}],
+        include_signature=False,
+    )
+
+    assert "Draft created with 1 attachment(s)! Draft ID: draft_url" in result
+
+    create_kwargs = (
+        mock_service.users.return_value.drafts.return_value.create.call_args.kwargs
+    )
+    raw_bytes = base64.urlsafe_b64decode(create_kwargs["body"]["message"]["raw"])
+    assert b"Content-Disposition: attachment;" in raw_bytes
+    assert b"doc.pdf" in raw_bytes
+
+
+@pytest.mark.asyncio
+async def test_send_gmail_message_with_url_attachment(monkeypatch):
+    """End-to-end: send_gmail_message should accept a URL attachment."""
+    fake_response = _FakeStreamResponse(
+        200,
+        headers={"content-type": "application/pdf"},
+        chunks=[b"pdf-content-here"],
+    )
+
+    monkeypatch.setattr(
+        gmail_tools, "ssrf_safe_stream", _mock_stream_response(fake_response)
+    )
+
+    mock_service = Mock()
+    mock_service.users().messages().send().execute.return_value = {"id": "msg_url"}
+
+    result = await _unwrap(send_gmail_message)(
+        service=mock_service,
+        user_google_email="user@example.com",
+        to="recipient@example.com",
+        subject="URL attachment test",
+        body="See attached from URL.",
+        attachments=[{"url": "https://example.com/doc.pdf", "filename": "doc.pdf"}],
+    )
+
+    assert "Email sent with 1 attachment(s)! Message ID: msg_url" in result
+
+    create_kwargs = (
+        mock_service.users.return_value.messages.return_value.send.call_args.kwargs
+    )
+    raw_bytes = base64.urlsafe_b64decode(create_kwargs["body"]["raw"])
+    assert b"Content-Disposition: attachment;" in raw_bytes
+    assert b"doc.pdf" in raw_bytes

@@ -461,7 +461,9 @@ async def modify_doc_text(
     Args:
         user_google_email: User's Google email address
         document_id: ID of the document to update
-        start_index: Start position for operation (0-based)
+        start_index: Start position for operation using Docs API indices from
+            inspect_doc_structure. For the main body, 0 is also accepted as an
+            alias for the first writable position.
         end_index: End position for text replacement/formatting (if not provided with text, text is inserted)
         text: New text to insert or replace with (optional - can format existing text without changing it)
         tab_id: Optional document tab ID to target
@@ -2106,7 +2108,9 @@ async def update_paragraph_style(
     Args:
         user_google_email: User's Google email address
         document_id: Document ID to modify
-        start_index: Start position (1-based)
+        start_index: Start position using Docs API indices from
+            inspect_doc_structure. For the main body, 0 is also accepted as an
+            alias for the first writable position.
         end_index: End position (exclusive) - should cover the entire paragraph
         heading_level: Heading level 0-6 (0 = NORMAL_TEXT, 1 = H1, 2 = H2, etc.)
                        Use for semantic document structure
@@ -2161,8 +2165,8 @@ async def update_paragraph_style(
     )
 
     # Validate range
-    if start_index < 1:
-        return "Error: start_index must be >= 1"
+    if start_index < 0:
+        return "Error: start_index must be >= 0"
     if end_index <= start_index:
         return "Error: end_index must be greater than start_index"
 

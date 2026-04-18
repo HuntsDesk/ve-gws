@@ -153,6 +153,23 @@ def _build_range(
     return range_obj
 
 
+def _normalize_body_start_index(
+    start_index: int,
+    tab_id: Optional[str] = None,
+    segment_id: Optional[str] = None,
+) -> int:
+    """
+    Normalize a start index for the main document body.
+
+    The Docs API reserves body index 0 for the leading section break. A few
+    public tools accept start_index=0 as a convenience alias for the first
+    writable body position, so normalize that here before building requests.
+    """
+    if start_index == 0 and tab_id is None and segment_id is None:
+        return 1
+    return start_index
+
+
 def _build_tabs_criteria(tab_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Build Docs tabsCriteria for operations that support tab-scoped selection."""
     if not tab_id:
@@ -826,7 +843,8 @@ def create_update_paragraph_style_request(
     Create an updateParagraphStyle request for Google Docs API.
 
     Args:
-        start_index: Start position of paragraph range
+        start_index: Start position of paragraph range. For the main body,
+            0 is accepted as an alias for the first writable position.
         end_index: End position of paragraph range
         heading_level: Heading level 0-6 (0 = NORMAL_TEXT, 1-6 = HEADING_N)
         alignment: Text alignment - 'START', 'CENTER', 'END', or 'JUSTIFIED'
@@ -864,9 +882,15 @@ def create_update_paragraph_style_request(
     if not paragraph_style:
         return None
 
+    normalized_start_index = _normalize_body_start_index(
+        start_index, tab_id, segment_id
+    )
+
     return {
         "updateParagraphStyle": {
-            "range": _build_range(start_index, end_index, tab_id, segment_id),
+            "range": _build_range(
+                normalized_start_index, end_index, tab_id, segment_id
+            ),
             "paragraphStyle": paragraph_style,
             "fields": ",".join(fields),
         }
@@ -1180,6 +1204,8 @@ def create_bullet_list_request(
         List of request dictionaries (insertText for nesting tabs if needed,
         then createParagraphBullets)
     """
+    start_index = _normalize_body_start_index(start_index, doc_tab_id, segment_id)
+
     if bullet_preset is None:
         if list_type == "UNORDERED":
             bullet_preset = "BULLET_DISC_CIRCLE_SQUARE"
@@ -1267,6 +1293,8 @@ def create_delete_bullet_list_request(
     Returns:
         Dictionary representing the deleteParagraphBullets request
     """
+    start_index = _normalize_body_start_index(start_index, doc_tab_id, segment_id)
+
     return {
         "deleteParagraphBullets": {
             "range": _build_range(start_index, end_index, doc_tab_id, segment_id),

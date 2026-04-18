@@ -1,5 +1,5 @@
 """
-Unit tests for Drive SSRF protections and DNS pinning helpers.
+Unit tests for SSRF protections and DNS pinning helpers.
 """
 
 import os
@@ -11,10 +11,11 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from gdrive import drive_tools
+from core import http_utils
 
 
-def test_resolve_and_validate_host_fails_closed_on_dns_error(monkeypatch):
+@pytest.mark.asyncio
+async def test_resolve_and_validate_host_fails_closed_on_dns_error(monkeypatch):
     """DNS resolution failures must fail closed."""
 
     def fake_getaddrinfo(hostname, port):
@@ -23,10 +24,11 @@ def test_resolve_and_validate_host_fails_closed_on_dns_error(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
     with pytest.raises(ValueError, match="Refusing request \\(fail-closed\\)"):
-        drive_tools._resolve_and_validate_host("example.com")
+        await http_utils.resolve_and_validate_host("example.com")
 
 
-def test_resolve_and_validate_host_rejects_ipv6_private(monkeypatch):
+@pytest.mark.asyncio
+async def test_resolve_and_validate_host_rejects_ipv6_private(monkeypatch):
     """IPv6 internal addresses must be rejected."""
 
     def fake_getaddrinfo(hostname, port):
@@ -43,10 +45,11 @@ def test_resolve_and_validate_host_rejects_ipv6_private(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
     with pytest.raises(ValueError, match="private/internal networks"):
-        drive_tools._resolve_and_validate_host("ipv6-internal.example")
+        await http_utils.resolve_and_validate_host("ipv6-internal.example")
 
 
-def test_resolve_and_validate_host_deduplicates_addresses(monkeypatch):
+@pytest.mark.asyncio
+async def test_resolve_and_validate_host_deduplicates_addresses(monkeypatch):
     """Duplicate DNS answers should be de-duplicated while preserving order."""
 
     def fake_getaddrinfo(hostname, port):
@@ -76,7 +79,7 @@ def test_resolve_and_validate_host_deduplicates_addresses(monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
-    assert drive_tools._resolve_and_validate_host("example.com") == [
+    assert await http_utils.resolve_and_validate_host("example.com") == [
         "93.184.216.34",
         "2606:2800:220:1:248:1893:25c8:1946",
     ]
@@ -107,12 +110,15 @@ async def test_fetch_url_with_pinned_ip_uses_pinned_target_and_host_header(monke
         async def send(self, request):
             return httpx.Response(200, request=httpx.Request("GET", request["url"]))
 
-    monkeypatch.setattr(
-        drive_tools, "_validate_url_not_internal", lambda url: ["93.184.216.34"]
-    )
-    monkeypatch.setattr(drive_tools.httpx, "AsyncClient", FakeAsyncClient)
+    async def fake_validate_url_not_internal(_url):
+        return ["93.184.216.34"]
 
-    response = await drive_tools._fetch_url_with_pinned_ip(
+    monkeypatch.setattr(
+        http_utils, "validate_url_not_internal", fake_validate_url_not_internal
+    )
+    monkeypatch.setattr(http_utils.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = await http_utils.fetch_url_with_pinned_ip(
         "https://example.com/path/to/file.txt?x=1"
     )
 
@@ -123,6 +129,29 @@ async def test_fetch_url_with_pinned_ip_uses_pinned_target_and_host_header(monke
     assert captured["extensions"]["sni_hostname"] == "example.com"
     assert captured["client_kwargs"]["trust_env"] is False
     assert captured["client_kwargs"]["follow_redirects"] is False
+    assert captured["client_kwargs"]["timeout"] is None
+
+
+@pytest.mark.asyncio
+async def test_ssrf_safe_fetch_threads_timeout_to_pinned_fetch(monkeypatch):
+    """Timeouts should flow through ssrf_safe_fetch to the pinned fetch helper."""
+    captured = {}
+    timeout = httpx.Timeout(5.0)
+
+    async def fake_fetch(url, *, timeout=None):
+        captured["url"] = url
+        captured["timeout"] = timeout
+        return httpx.Response(200, request=httpx.Request("GET", url), content=b"ok")
+
+    monkeypatch.setattr(http_utils, "fetch_url_with_pinned_ip", fake_fetch)
+
+    response = await http_utils.ssrf_safe_fetch(
+        "https://example.com/start", timeout=timeout
+    )
+
+    assert response.status_code == 200
+    assert captured["url"] == "https://example.com/start"
+    assert captured["timeout"] is timeout
 
 
 @pytest.mark.asyncio
@@ -130,7 +159,7 @@ async def test_ssrf_safe_fetch_follows_relative_redirects(monkeypatch):
     """Relative redirects should be resolved and re-checked."""
     calls = []
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, *, timeout=None):
         calls.append(url)
         if len(calls) == 1:
             return httpx.Response(
@@ -140,9 +169,9 @@ async def test_ssrf_safe_fetch_follows_relative_redirects(monkeypatch):
             )
         return httpx.Response(200, request=httpx.Request("GET", url), content=b"ok")
 
-    monkeypatch.setattr(drive_tools, "_fetch_url_with_pinned_ip", fake_fetch)
+    monkeypatch.setattr(http_utils, "fetch_url_with_pinned_ip", fake_fetch)
 
-    response = await drive_tools._ssrf_safe_fetch("https://example.com/start")
+    response = await http_utils.ssrf_safe_fetch("https://example.com/start")
 
     assert response.status_code == 200
     assert calls == ["https://example.com/start", "https://example.com/next"]
@@ -152,14 +181,46 @@ async def test_ssrf_safe_fetch_follows_relative_redirects(monkeypatch):
 async def test_ssrf_safe_fetch_rejects_disallowed_redirect_scheme(monkeypatch):
     """Redirects to non-http(s) schemes should be blocked."""
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, *, timeout=None):
         return httpx.Response(
             302,
             headers={"location": "file:///etc/passwd"},
             request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr(drive_tools, "_fetch_url_with_pinned_ip", fake_fetch)
+    monkeypatch.setattr(http_utils, "fetch_url_with_pinned_ip", fake_fetch)
 
     with pytest.raises(ValueError, match="Redirect to disallowed scheme"):
-        await drive_tools._ssrf_safe_fetch("https://example.com/start")
+        await http_utils.ssrf_safe_fetch("https://example.com/start")
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_with_pinned_ip_redacts_secret_query_in_errors():
+    with pytest.raises(ValueError) as exc_info:
+        await http_utils.fetch_url_with_pinned_ip(
+            "ftp://user:pass@example.com/path/to/file?token=secret#fragment"
+        )
+
+    message = str(exc_info.value)
+    assert "example.com/path/to/file" in message
+    assert "token=secret" not in message
+    assert "fragment" not in message
+
+
+@pytest.mark.asyncio
+async def test_ssrf_safe_fetch_redacts_redirect_source_in_errors(monkeypatch):
+    async def fake_fetch(url, *, timeout=None):
+        return httpx.Response(
+            302,
+            headers={},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(http_utils, "fetch_url_with_pinned_ip", fake_fetch)
+
+    with pytest.raises(http_utils.SSRFFetchError) as exc_info:
+        await http_utils.ssrf_safe_fetch("https://example.com/start?token=secret")
+
+    message = str(exc_info.value)
+    assert "example.com/start" in message
+    assert "token=secret" not in message
