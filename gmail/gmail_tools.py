@@ -1230,20 +1230,25 @@ async def search_gmail_messages(
     page_size: int = 10,
     page_token: Optional[str] = None,
 ) -> str:
-    """
-    Searches messages in a user's Gmail account based on a query.
-    Returns both Message IDs and Thread IDs for each found message, along with Gmail web interface links for manual verification.
-    Supports pagination via page_token parameter.
+    """Search Gmail messages and return their IDs plus clickable web links.
+
+    Use this to locate messages by subject/sender/date before calling
+    get_gmail_message_content (single) or get_gmail_messages_content_batch
+    (many). This tool returns IDs only, not bodies — fetch bodies in a
+    second step. Requires the gmail.readonly OAuth scope.
 
     Args:
-        query (str): The search query. Supports standard Gmail search operators.
-        user_google_email (str): The user's Google email address. Required.
-        page_size (int): The maximum number of messages to return. Defaults to 10.
-        page_token (Optional[str]): Token for retrieving the next page of results. Use the next_page_token from a previous response.
+        query: Gmail search operators, e.g. "from:alice@ex.com has:attachment
+            newer_than:7d label:INBOX -category:promotions".
+        user_google_email: The user's Google email address (authenticated
+            account).
+        page_size: Max results per page, 1-500. Default 10.
+        page_token: Pagination cursor — pass the next_page_token value
+            returned by a previous call to fetch the next page.
 
     Returns:
-        str: LLM-friendly structured results with Message IDs, Thread IDs, and clickable Gmail web interface URLs for each found message.
-        Includes pagination token if more results are available.
+        Formatted list with Message ID, Thread ID, and Gmail web URL per hit,
+        plus a "Next page token: ..." line when more results exist.
     """
     logger.info(
         f"[search_gmail_messages] Email: '{user_google_email}', Query: '{query}', Page size: {page_size}"
@@ -1305,19 +1310,26 @@ async def get_gmail_message_content(
         ),
     ] = "text",
 ) -> str:
-    """
-    Retrieves the full content (subject, sender, recipients, body) of a specific Gmail message.
+    """Retrieve one Gmail message's headers and body by ID.
+
+    Use this for a single message; for multiple IDs prefer
+    get_gmail_messages_content_batch to avoid round trips. For an entire
+    conversation use get_gmail_thread_content. Attachment bytes are not
+    returned here — use get_gmail_attachment_content. Requires the
+    gmail.readonly OAuth scope.
 
     Args:
-        message_id (str): The unique ID of the Gmail message to retrieve.
-        user_google_email (str): The user's Google email address. Required.
-        body_format (Literal["text", "html", "raw"]): Body output format.
-            "text" (default) returns plaintext (HTML converted to text as fallback).
-            "html" returns the raw HTML body as-is without conversion.
-            "raw" fetches the full raw MIME message and returns the base64url-decoded content.
+        message_id: Gmail message ID from search_gmail_messages or from the
+            URL like mail.google.com/mail/u/0/#inbox/<id>.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        body_format: "text" (default, HTML is stripped to plaintext as
+            fallback), "html" (raw HTML body as-is), or "raw" (full RFC-822
+            MIME, base64url-decoded — useful for forensic or raw-header work).
 
     Returns:
-        str: The message details including subject, sender, date, Message-ID, recipients (To, Cc), and body content.
+        Formatted string with Subject, From, To, Cc, Date, Message-ID, and
+        the body section labeled BODY (or RAW MIME when body_format="raw").
     """
     logger.info(
         f"[get_gmail_message_content] Invoked. Message ID: '{message_id}', Email: '{user_google_email}'"
@@ -1419,21 +1431,29 @@ async def get_gmail_messages_content_batch(
         ),
     ] = "text",
 ) -> str:
-    """
-    Retrieves the content of multiple Gmail messages in a single batch request.
-    Supports up to 25 messages per batch to prevent SSL connection exhaustion.
+    """Fetch many Gmail messages in one batch, chunked internally.
+
+    Prefer this over calling get_gmail_message_content in a loop — uses the
+    Gmail batch API (25 per request, auto-chunked) and falls back to
+    sequential fetches if the batch call fails. Use format="metadata" when
+    you only need headers for triage (cheaper + faster). Requires the
+    gmail.readonly OAuth scope.
 
     Args:
-        message_ids (List[str]): List of Gmail message IDs to retrieve (max 25 per batch).
-        user_google_email (str): The user's Google email address. Required.
-        format (Literal["full", "metadata"]): Message format. "full" includes body, "metadata" only headers.
-        body_format (Literal["text", "html", "raw"]): Body output format (only applies when format='full').
-            "text" (default) returns plaintext (HTML converted to text as fallback).
-            "html" returns the raw HTML body as-is without conversion.
-            "raw" fetches the full raw MIME message and returns the base64url-decoded content.
+        message_ids: List of Gmail message IDs from search_gmail_messages.
+            No hard cap — the tool chunks into batches of 25 automatically.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        format: "full" (headers + body) or "metadata" (headers only, much
+            faster for listing triage).
+        body_format: Only applies when format="full". "text" (default,
+            HTML stripped to plaintext), "html" (raw HTML), or "raw" (full
+            RFC-822 MIME, base64url-decoded).
 
     Returns:
-        str: A formatted list of message contents including subject, sender, date, Message-ID, recipients (To, Cc), and body (if full format).
+        Concatenated message blocks separated by "---", each with headers,
+        Gmail web link, and BODY (or RAW MIME) when applicable. Per-message
+        errors are surfaced inline prefixed with a warning marker.
     """
     logger.info(
         f"[get_gmail_messages_content_batch] Invoked. Message count: {len(message_ids)}, Email: '{user_google_email}'"
@@ -1576,20 +1596,27 @@ async def get_gmail_attachment_content(
     attachment_id: str,
     user_google_email: str,
 ) -> str:
-    """
-    Downloads an email attachment and saves it to local disk.
+    """Download a Gmail attachment to disk (or expose via download URL).
 
-    In stdio mode, returns the local file path for direct access.
-    In HTTP mode, returns a temporary download URL (valid for 1 hour).
-    May re-fetch message metadata to resolve filename and MIME type.
+    Side effects: writes a file to the configured attachment storage (stdio
+    mode) or publishes a temporary download URL valid for 1 hour (HTTP
+    mode). In stateless mode, no file is written and a base64 preview is
+    returned instead. Attachment IDs are ephemeral — always re-fetch the
+    parent message (get_gmail_message_content) just before calling this.
+    Requires the gmail.readonly OAuth scope.
 
     Args:
-        message_id (str): The ID of the Gmail message containing the attachment.
-        attachment_id (str): The ID of the attachment to download.
-        user_google_email (str): The user's Google email address. Required.
+        message_id: Gmail message ID that owns the attachment.
+        attachment_id: Attachment ID from the parent message's payload parts
+            — get this by calling get_gmail_message_content and reading the
+            attachment metadata section.
+        user_google_email: The user's Google email address (authenticated
+            account).
 
     Returns:
-        str: Attachment metadata with either a local file path or download URL.
+        Human-readable block with filename, size in KB, and either a local
+        file path (stdio) or a download URL (HTTP). Includes a reminder
+        that attachment IDs expire.
     """
     logger.info(
         f"[get_gmail_attachment_content] Invoked. Message ID: '{message_id}', Email: '{user_google_email}'"
@@ -2339,19 +2366,27 @@ async def get_gmail_thread_content(
         ),
     ] = "text",
 ) -> str:
-    """
-    Retrieves the complete content of a Gmail conversation thread, including all messages.
+    """Retrieve every message in one Gmail conversation thread.
+
+    Use this when you need the whole back-and-forth (replies, forwards,
+    quoted history) — for a single standalone message use
+    get_gmail_message_content. For many threads at once use
+    get_gmail_threads_content_batch. Requires the gmail.readonly OAuth
+    scope.
 
     Args:
-        thread_id (str): The unique ID of the Gmail thread to retrieve.
-        user_google_email (str): The user's Google email address. Required.
-        body_format (Literal["text", "html", "raw"]): Body output format.
-            "text" (default) returns plaintext (HTML converted to text as fallback).
-            "html" returns the raw HTML body as-is without conversion.
-            "raw" fetches each message's full raw MIME content and returns the base64url-decoded body.
+        thread_id: Gmail thread ID, typically the "threadId" field returned
+            by search_gmail_messages or any message-get response.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        body_format: "text" (default, HTML stripped), "html" (raw HTML
+            per message), or "raw" (each message's full RFC-822 MIME,
+            base64url-decoded).
 
     Returns:
-        str: The complete thread content with all messages formatted for reading.
+        Formatted block starting with thread subject and message count,
+        then per-message sections (From, Date, Message-ID, In-Reply-To,
+        References, body) numbered sequentially.
     """
     logger.info(
         f"[get_gmail_thread_content] Invoked. Thread ID: '{thread_id}', Email: '{user_google_email}'"
@@ -2402,20 +2437,25 @@ async def get_gmail_threads_content_batch(
         ),
     ] = "text",
 ) -> str:
-    """
-    Retrieves the content of multiple Gmail threads in a single batch request.
-    Supports up to 25 threads per batch to prevent SSL connection exhaustion.
+    """Fetch many Gmail threads in one batch, chunked internally.
+
+    Prefer this over calling get_gmail_thread_content in a loop — uses the
+    Gmail batch API (25 per request, auto-chunked) and falls back to
+    sequential fetches if the batch call fails. Requires the gmail.readonly
+    OAuth scope.
 
     Args:
-        thread_ids (List[str]): A list of Gmail thread IDs to retrieve. The function will automatically batch requests in chunks of 25.
-        user_google_email (str): The user's Google email address. Required.
-        body_format (Literal["text", "html", "raw"]): Body output format.
-            "text" (default) returns plaintext (HTML converted to text as fallback).
-            "html" returns the raw HTML body as-is without conversion.
-            "raw" fetches each message's full raw MIME content and returns the base64url-decoded body.
+        thread_ids: List of Gmail thread IDs. No hard cap — the tool chunks
+            into batches of 25 automatically.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        body_format: "text" (default, HTML stripped), "html" (raw HTML), or
+            "raw" (each message's full RFC-822 MIME, base64url-decoded).
 
     Returns:
-        str: A formatted list of thread contents with separators.
+        Concatenated thread blocks separated by "---", each formatted the
+        same way as get_gmail_thread_content. Per-thread errors surface
+        inline with a warning marker.
     """
     logger.info(
         f"[get_gmail_threads_content_batch] Invoked. Thread count: {len(thread_ids)}, Email: '{user_google_email}'"
@@ -2529,14 +2569,20 @@ async def get_gmail_threads_content_batch(
 @handle_http_errors("list_gmail_labels", is_read_only=True, service_type="gmail")
 @require_google_service("gmail", "gmail_read")
 async def list_gmail_labels(service, user_google_email: str) -> str:
-    """
-    Lists all labels in the user's Gmail account.
+    """List every label in the user's mailbox, split system vs user.
+
+    Use this to discover label IDs before calling
+    modify_gmail_message_labels / batch_modify_gmail_message_labels /
+    manage_gmail_filter — label IDs (not names) are what those tools
+    require. Requires the gmail.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
 
     Returns:
-        str: A formatted list of all labels with their IDs, names, and types.
+        Formatted list grouped by SYSTEM LABELS (INBOX, SENT, TRASH, etc.)
+        and USER LABELS, each entry showing name and ID.
     """
     logger.info(f"[list_gmail_labels] Invoked. Email: '{user_google_email}'")
 
@@ -2585,19 +2631,31 @@ async def manage_gmail_label(
     label_list_visibility: Literal["labelShow", "labelHide"] = "labelShow",
     message_list_visibility: Literal["show", "hide"] = "show",
 ) -> str:
-    """
-    Manages Gmail labels: create, update, or delete labels.
+    """Create, update, or delete a Gmail label.
+
+    Side effects: creates/mutates/deletes a label on the account — delete
+    is destructive and unrecoverable. To only apply or remove labels from
+    messages (not manage the labels themselves) use
+    modify_gmail_message_labels instead. Requires the gmail.labels OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (Literal["create", "update", "delete"]): Action to perform on the label.
-        name (Optional[str]): Label name. Required for create, optional for update.
-        label_id (Optional[str]): Label ID. Required for update and delete operations.
-        label_list_visibility (Literal["labelShow", "labelHide"]): Whether the label is shown in the label list.
-        message_list_visibility (Literal["show", "hide"]): Whether the label is shown in the message list.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create" (needs name), "update" (needs label_id; name
+            optional), or "delete" (needs label_id).
+        name: Label display name, e.g. "Clients/Acme" — slash creates a
+            nested label. Required for create.
+        label_id: Label ID from list_gmail_labels (e.g. "Label_1234").
+            Required for update and delete.
+        label_list_visibility: "labelShow" (appears in sidebar) or
+            "labelHide" (hidden from sidebar).
+        message_list_visibility: "show" (label pill shown on messages) or
+            "hide" (no pill on messages).
 
     Returns:
-        str: Confirmation message of the label operation.
+        Confirmation line with the resulting label name and ID, or a
+        deletion confirmation.
     """
     logger.info(
         f"[manage_gmail_label] Invoked. Email: '{user_google_email}', Action: '{action}'"
@@ -2656,14 +2714,21 @@ async def manage_gmail_label(
 @handle_http_errors("list_gmail_filters", is_read_only=True, service_type="gmail")
 @require_google_service("gmail", "gmail_settings_basic")
 async def list_gmail_filters(service, user_google_email: str) -> str:
-    """
-    Lists all Gmail filters configured in the user's mailbox.
+    """List every server-side Gmail filter configured on the mailbox.
+
+    Filters auto-apply actions (label, forward, archive) to incoming mail
+    matching their criteria. Use this to audit or discover filter IDs
+    before calling manage_gmail_filter for delete. Requires the
+    gmail.settings.basic OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
 
     Returns:
-        str: A formatted list of filters with their criteria and actions.
+        Formatted per-filter block with Filter ID, Criteria (From, To,
+        Subject, Query, hasAttachment, size, etc.), and Actions (addLabel,
+        removeLabel, forward).
     """
     logger.info(f"[list_gmail_filters] Invoked. Email: '{user_google_email}'")
 
@@ -2741,18 +2806,31 @@ async def manage_gmail_filter(
     filter_action: Optional[JsonDict] = None,
     filter_id: Optional[str] = None,
 ) -> str:
-    """
-    Manages Gmail filters. Supports creating and deleting filters.
+    """Create or delete a server-side Gmail filter.
+
+    Side effects: creates a persistent auto-action rule or permanently
+    deletes one. Filter updates are not supported by the Gmail API —
+    delete and recreate instead. Use list_gmail_filters first to inspect
+    existing filters. Requires the gmail.settings.basic OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): Action to perform - "create" or "delete".
-        criteria (Optional[Dict[str, Any]]): Filter criteria object (required for create).
-        filter_action (Optional[Dict[str, Any]]): Filter action object (required for create). Named 'filter_action' to avoid shadowing the 'action' parameter.
-        filter_id (Optional[str]): ID of the filter to delete (required for delete).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create" or "delete". Case-insensitive.
+        criteria: Filter match criteria for create. Keys: from, to,
+            subject, query (Gmail search operators like "label:INBOX
+            older_than:30d"), negatedQuery, hasAttachment, size,
+            sizeComparison, excludeChats. Example: {"from": "newsletter@",
+            "subject": "deal"}.
+        filter_action: What to do on match for create. Keys: addLabelIds
+            (list of label IDs from list_gmail_labels), removeLabelIds,
+            forward (alias email). Example: {"addLabelIds": ["Label_1"],
+            "removeLabelIds": ["INBOX"]}.
+        filter_id: Filter ID from list_gmail_filters. Required for delete.
 
     Returns:
-        str: Confirmation message with filter details.
+        Confirmation with the new Filter ID (create) or the deleted
+        filter's criteria/action summary (delete).
     """
     action_lower = action.lower().strip()
     if action_lower == "create":
@@ -2815,19 +2893,26 @@ async def modify_gmail_message_labels(
         Field(json_schema_extra={"type": "array", "items": {"type": "string"}}),
     ] = None,
 ) -> str:
-    """
-    Adds or removes labels from a Gmail message.
-    To archive an email, remove the INBOX label.
-    To delete an email, add the TRASH label.
+    """Add or remove labels on one Gmail message.
+
+    Side effects: mutates the message's label set. Common recipes:
+    remove "INBOX" to archive, add "TRASH" to delete (soft), add "STARRED"
+    to star. For many messages at once use
+    batch_modify_gmail_message_labels. To create/delete the labels
+    themselves use manage_gmail_label. Requires the gmail.modify OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        message_id (str): The ID of the message to modify.
-        add_label_ids (Optional[List[str]]): List of label IDs to add to the message.
-        remove_label_ids (Optional[List[str]]): List of label IDs to remove from the message.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        message_id: Gmail message ID from search_gmail_messages.
+        add_label_ids: Label IDs to add. Use system IDs like "INBOX",
+            "STARRED", "TRASH", "UNREAD", or user label IDs from
+            list_gmail_labels (e.g. "Label_1234"). Names do NOT work.
+        remove_label_ids: Label IDs to remove, same ID rules as above.
 
     Returns:
-        str: Confirmation message of the label changes applied to the message.
+        Confirmation line listing which labels were added and removed.
     """
     logger.info(
         f"[modify_gmail_message_labels] Invoked. Email: '{user_google_email}', Message ID: '{message_id}'"
@@ -2873,17 +2958,25 @@ async def batch_modify_gmail_message_labels(
         Field(json_schema_extra={"type": "array", "items": {"type": "string"}}),
     ] = None,
 ) -> str:
-    """
-    Adds or removes labels from multiple Gmail messages in a single batch request.
+    """Add or remove labels on many Gmail messages in one API call.
+
+    Side effects: mutates label sets on every message in message_ids. Uses
+    the Gmail batchModify endpoint (up to 1000 IDs per call — Gmail's
+    limit, not enforced here). For single messages use
+    modify_gmail_message_labels. Requires the gmail.modify OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        message_ids (List[str]): A list of message IDs to modify.
-        add_label_ids (Optional[List[str]]): List of label IDs to add to the messages.
-        remove_label_ids (Optional[List[str]]): List of label IDs to remove from the messages.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        message_ids: Gmail message IDs from search_gmail_messages.
+        add_label_ids: Label IDs to add across all messages. Use system IDs
+            ("INBOX", "TRASH", "UNREAD") or user label IDs from
+            list_gmail_labels. Names do NOT work.
+        remove_label_ids: Label IDs to remove across all messages.
 
     Returns:
-        str: Confirmation message of the label changes applied to the messages.
+        Confirmation showing the message count and which labels were
+        added/removed in bulk.
     """
     logger.info(
         f"[batch_modify_gmail_message_labels] Invoked. Email: '{user_google_email}', Message IDs: '{message_ids}'"

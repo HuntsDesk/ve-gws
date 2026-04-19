@@ -397,14 +397,21 @@ def _strip_utc_offset(datetime_str: str) -> str:
 @handle_http_errors("list_calendars", is_read_only=True, service_type="calendar")
 @require_google_service("calendar", "calendar_read")
 async def list_calendars(service, user_google_email: str) -> str:
-    """
-    Retrieves a list of calendars accessible to the authenticated user.
+    """List every calendar the user owns or has access to.
+
+    Use this to discover calendar IDs before calling get_events, manage_event,
+    or create_calendar — calendar IDs (not names) are what those tools
+    require. The user's main calendar is always addressable as "primary".
+    Requires the calendar.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
 
     Returns:
-        str: A formatted list of the user's calendars (summary, ID, primary status).
+        Formatted list with one line per calendar showing summary, primary
+        marker, and calendar ID. The ID is the value to pass to other tools
+        as calendar_id.
     """
     logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
 
@@ -442,23 +449,39 @@ async def get_events(
     detailed: bool = False,
     include_attachments: bool = False,
 ) -> str:
-    """
-    Retrieves events from a specified Google Calendar. Can retrieve a single event by ID or multiple events within a time range.
-    You can also search for events by keyword by supplying the optional "query" param.
+    """Fetch events from a calendar — one by ID, or a filtered range.
+
+    Two modes: (1) pass event_id to retrieve a single event (range/query
+    params ignored); (2) omit event_id to list events in a time window,
+    optionally filtered by keyword. For free/busy scanning across many
+    calendars use query_freebusy instead. For creating/updating events use
+    manage_event. Requires the calendar.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        calendar_id (str): The ID of the calendar to query. Use 'primary' for the user's primary calendar. Defaults to 'primary'. Calendar IDs can be obtained using `list_calendars`.
-        event_id (Optional[str]): The ID of a specific event to retrieve. If provided, retrieves only this event and ignores time filtering parameters.
-        time_min (Optional[str]): The start of the time range (inclusive) in RFC3339 format (e.g., '2024-05-12T10:00:00Z' or '2024-05-12'). If omitted, defaults to the current time. Ignored if event_id is provided.
-        time_max (Optional[str]): The end of the time range (exclusive) in RFC3339 format. If omitted, events starting from `time_min` onwards are considered (up to `max_results`). Ignored if event_id is provided.
-        max_results (int): The maximum number of events to return. Defaults to 25. Ignored if event_id is provided.
-        query (Optional[str]): A keyword to search for within event fields (summary, description, location). Ignored if event_id is provided.
-        detailed (bool): Whether to return detailed event information including description, location, attendees, and attendee details (response status, organizer, optional flags). Defaults to False.
-        include_attachments (bool): Whether to include attachment information in detailed event output. When True, shows attachment details (fileId, fileUrl, mimeType, title) for events that have attachments. Only applies when detailed=True. Set this to True when you need to view or access files that have been attached to calendar events, such as meeting documents, presentations, or other shared files. Defaults to False.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        calendar_id: Calendar ID from list_calendars, or "primary" for the
+            user's main calendar. Default "primary".
+        event_id: Specific event ID to fetch. From a prior get_events call
+            or a calendar URL like calendar.google.com/calendar/u/0/r/eventedit/<id>.
+            When set, all range/query filters are ignored.
+        time_min: Range start, RFC3339 (e.g. "2026-05-01T00:00:00Z" or
+            "2026-05-01"). Defaults to now when omitted.
+        time_max: Range end, RFC3339 exclusive. Omit for open-ended range
+            (capped by max_results).
+        max_results: Cap on events returned, 1-2500. Default 25.
+        query: Free-text filter matched against summary, description, and
+            location.
+        detailed: False returns just summary + times + link; True adds
+            description, location, attendees with response status, and
+            organizer.
+        include_attachments: When detailed=True, also include attachment
+            fileId/fileUrl/mimeType/title for events with attached Drive
+            files. Ignored when detailed=False.
 
     Returns:
-        str: A formatted list of events (summary, start and end times, link) within the specified range, or detailed information for a single event if event_id is provided.
+        Formatted event list with summary, start/end, and link per event;
+        or a single-event detail block when event_id is given.
     """
     logger.info(
         f"[get_events] Raw parameters - event_id: '{event_id}', time_min: '{time_min}', time_max: '{time_max}', query: '{query}', detailed: {detailed}, include_attachments: {include_attachments}"
@@ -1309,38 +1332,55 @@ async def manage_event(
     rsvp_comment: Optional[str] = None,
     send_updates: Optional[str] = None,
 ) -> str:
-    """
-    Manages calendar events. Supports creating, updating, deleting, and RSVP.
+    """Create, update, delete, or RSVP to a calendar event.
+
+    Side effects: mutates calendar state on the account. Delete is
+    destructive. Attendee email notifications follow send_updates. For
+    read-only fetches use get_events; for focus-time blocks use
+    manage_focus_time. Requires the calendar.events OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): Action to perform - "create", "update", "delete", or "rsvp".
-        summary (Optional[str]): Event title (required for create).
-        start_time (Optional[str]): Start time in RFC3339 format (required for create).
-        end_time (Optional[str]): End time in RFC3339 format (required for create).
-        event_id (Optional[str]): Event ID (required for update and delete).
-        calendar_id (str): Calendar ID (default: 'primary').
-        description (Optional[str]): Event description.
-        location (Optional[str]): Event location.
-        attendees (Optional[Union[List[str], List[Dict[str, Any]]]]): Attendee email addresses or objects.
-        timezone (Optional[str]): Timezone (e.g., "America/New_York").
-        attachments (Optional[List[str]]): List of Google Drive file URLs or IDs to attach.
-        add_google_meet (Optional[bool]): Whether to add/remove Google Meet.
-        reminders (Optional[Union[str, List[Dict[str, Any]]]]): Custom reminder objects.
-        use_default_reminders (Optional[bool]): Whether to use default reminders.
-        transparency (Optional[str]): "opaque" (busy) or "transparent" (free).
-        visibility (Optional[str]): "default", "public", "private", or "confidential".
-        color_id (Optional[str]): Event color ID (1-11, update only).
-        recurrence (Optional[List[str]]): RFC5545 recurrence rules for a recurring event, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
-        guests_can_modify (Optional[bool]): Whether attendees can modify.
-        guests_can_invite_others (Optional[bool]): Whether attendees can invite others.
-        guests_can_see_other_guests (Optional[bool]): Whether attendees can see other guests.
-        response (Optional[str]): RSVP response — "accepted", "declined", "tentative", or "needsAction" (rsvp action only).
-        rsvp_comment (Optional[str]): Optional message to include with the RSVP response (rsvp action only).
-        send_updates (Optional[str]): Notification behavior for RSVP — "all" (default), "externalOnly", or "none" (rsvp action only).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "update", "delete", or "rsvp". Case-insensitive.
+        summary: Event title. Required for create; optional for update.
+        start_time: RFC3339 start, e.g. "2026-05-01T15:00:00-04:00" or
+            "2026-05-01" for all-day. Required for create.
+        end_time: RFC3339 end (exclusive). Required for create.
+        event_id: Event ID from get_events. Required for update, delete,
+            rsvp.
+        calendar_id: Calendar ID from list_calendars, or "primary".
+        description: Event body text. Supports plain text and some HTML.
+        location: Free-form location string or address.
+        attendees: List of emails (e.g. ["alice@ex.com"]) or attendee
+            objects (e.g. [{"email": "alice@ex.com", "optional": true}]).
+        timezone: IANA zone like "America/New_York". Applied to start/end
+            when they are tz-naive.
+        attachments: Drive file IDs or sharable URLs — attached as event
+            files visible to attendees.
+        add_google_meet: True to attach a Meet conference, False on update
+            to remove it.
+        reminders: List of reminder objects like
+            [{"method": "popup", "minutes": 10}] or a JSON string of same.
+            Ignored when use_default_reminders=True.
+        use_default_reminders: True (default on create) to use the
+            calendar's default reminders. Set False to use `reminders`.
+        transparency: "opaque" shows as busy; "transparent" shows as free.
+        visibility: "default", "public", "private", or "confidential".
+        color_id: Color index 1-11 (update only); see Calendar color map.
+        recurrence: RFC5545 rules, e.g. ["RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10"].
+        guests_can_modify: Allow attendees to edit the event.
+        guests_can_invite_others: Allow attendees to invite more people.
+        guests_can_see_other_guests: Allow attendees to see the guest list.
+        response: RSVP value for action="rsvp" — "accepted", "declined",
+            "tentative", or "needsAction".
+        rsvp_comment: Optional note sent with the RSVP.
+        send_updates: RSVP notification behavior — "all" (default),
+            "externalOnly", or "none".
 
     Returns:
-        str: Confirmation message with event details.
+        Confirmation line with the event summary, ID, and an HTML link
+        (create/update); or a deletion/RSVP confirmation.
     """
     action_lower = action.lower().strip()
     if action_lower == "create":
@@ -1766,28 +1806,44 @@ async def manage_out_of_office(
     event_id: Optional[str] = None,
     calendar_id: str = "primary",
 ) -> str:
-    """
-    Manages Out of Office events on Google Calendar. These special events auto-decline
-    meeting invitations and set the user's status to "Out of office" across Google Workspace.
+    """Create, list, update, or delete Out of Office events.
+
+    OOO events are a special event type that auto-declines conflicting
+    invitations and sets Workspace presence to "Out of office". They live
+    on the primary calendar only. For normal events use manage_event; for
+    focus-time blocks use manage_focus_time. Side effects: mutating actions
+    may auto-decline existing/incoming invites based on auto_decline_mode.
+    Requires the calendar.events OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): Action to perform - "create", "list", "update", or "delete".
-        start_time (Optional[str]): Start date/time. Use 'YYYY-MM-DD' for full-day or RFC3339 for partial-day (e.g., '2024-04-05T09:00:00Z'). Date-only values are auto-converted to dateTime (midnight-to-midnight). Required for create.
-        end_time (Optional[str]): End date/time (exclusive). Same format as start_time. For a single full day on April 5, use start_time='2026-04-05' and end_time='2026-04-06'. Required for create.
-        summary (Optional[str]): Display text on the calendar. Defaults to "Out of Office".
-        auto_decline_mode (Optional[str]): How to handle conflicting invitations. One of: "declineAllConflictingInvitations" (default), "declineOnlyNewConflictingInvitations", "declineNone".
-        decline_message (Optional[str]): Message included when auto-declining invitations.
-        recurrence (Optional[List[str]]): RFC5545 recurrence rules for a recurring Out of Office series, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
-        timezone (Optional[str]): Timezone for the event (e.g., "America/New_York", "Europe/London"). Required when using date-only values or dateTime values without an explicit UTC offset.
-        time_min (Optional[str]): For "list" action: start of time range. Defaults to current time. Recurring series are expanded into individual instances in the requested range.
-        time_max (Optional[str]): For "list" action: end of time range.
-        max_results (int): For "list" action: maximum events to return. Defaults to 10.
-        event_id (Optional[str]): Event ID. Required for "update" and "delete" actions.
-        calendar_id (str): Calendar ID. Defaults to 'primary'. Out of Office status events live on primary calendars, so use 'primary' or a user's primary calendar ID/email rather than a secondary calendar ID.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "list", "update", or "delete". Case-insensitive.
+        start_time: Start date/time for create/update. "YYYY-MM-DD" is
+            auto-converted to midnight; RFC3339 ("2026-04-05T09:00:00-04:00")
+            works for partial days.
+        end_time: End (exclusive). For a single full day on Apr 5, pass
+            start="2026-04-05", end="2026-04-06".
+        summary: Display label. Defaults to "Out of Office".
+        auto_decline_mode: "declineAllConflictingInvitations" (default),
+            "declineOnlyNewConflictingInvitations", or "declineNone".
+        decline_message: Body of auto-decline replies sent to organizers.
+        recurrence: RFC5545 rules, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
+        timezone: IANA zone like "America/New_York". Required when
+            start/end are date-only or lack a UTC offset.
+        time_min: List-action range start. Defaults to now. Recurring
+            series expand to instances within the range.
+        time_max: List-action range end.
+        max_results: List-action cap. Default 10.
+        event_id: Event ID from a prior list call. Required for update
+            and delete.
+        calendar_id: Default "primary". OOO lives on primary calendars —
+            a user's primary ID or email works, secondary calendar IDs do
+            not.
 
     Returns:
-        str: Confirmation message with event details, or a formatted list of OOO events.
+        Confirmation with event summary/ID/link (create/update),
+        formatted list of OOO events (list), or deletion confirmation.
     """
     action_lower = action.lower().strip()
     if action_lower == "create":
@@ -2232,31 +2288,42 @@ async def manage_focus_time(
     event_id: Optional[str] = None,
     calendar_id: str = "primary",
 ) -> str:
-    """
-    Manages Focus Time events on Google Calendar. These special events auto-decline
-    meeting invitations and, by default, set the user's chat status to Do Not
-    Disturb, helping protect blocks of uninterrupted work time.
+    """Create, list, update, or delete Focus Time events.
+
+    Focus Time is a special event type that auto-declines conflicting
+    invitations and (by default) sets Google Chat to Do Not Disturb for
+    the duration. Lives on the primary calendar only. For regular events
+    use manage_event; for OOO use manage_out_of_office. Side effects:
+    mutating actions may auto-decline existing/incoming invites and flip
+    chat presence. Requires the calendar.events OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): Action to perform - "create", "list", "update", or "delete".
-        start_time (Optional[str]): Start date/time. Use 'YYYY-MM-DD' for full-day or RFC3339 for partial-day (e.g., '2024-04-05T09:00:00Z'). Date-only values are auto-converted to dateTime (midnight-to-midnight). Required for create.
-        end_time (Optional[str]): End date/time (exclusive). Same format as start_time. For a single full day on April 5, use start_time='2026-04-05' and end_time='2026-04-06'. Required for create.
-        summary (Optional[str]): Display text on the calendar. Defaults to "Focus Time".
-        description (Optional[str]): Event description. Useful for adding context about what the focus time is for.
-        auto_decline_mode (Optional[str]): How to handle conflicting invitations. One of: "declineAllConflictingInvitations" (default), "declineOnlyNewConflictingInvitations", "declineNone".
-        decline_message (Optional[str]): Message included when auto-declining invitations.
-        chat_status (Optional[str]): Google Chat status during the focus time. Supports "doNotDisturb" (default) and "available".
-        recurrence (Optional[List[str]]): RFC5545 recurrence rules for a recurring Focus Time series, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
-        timezone (Optional[str]): Timezone for the event (e.g., "America/New_York", "Europe/London"). Required when using date-only values or dateTime values without an explicit UTC offset.
-        time_min (Optional[str]): For "list" action: start of time range. Defaults to current time. Recurring series are expanded into individual instances in the requested range.
-        time_max (Optional[str]): For "list" action: end of time range.
-        max_results (int): For "list" action: maximum events to return. Defaults to 10.
-        event_id (Optional[str]): Event ID. Required for "update" and "delete" actions.
-        calendar_id (str): Calendar ID. Defaults to 'primary'. Focus Time status events live on primary calendars, so use 'primary' or a user's primary calendar ID/email rather than a secondary calendar ID.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "list", "update", or "delete". Case-insensitive.
+        start_time: Start date/time. "YYYY-MM-DD" auto-converts to
+            midnight; RFC3339 works for partial days.
+        end_time: End (exclusive). For a full day on Apr 5 pass
+            start="2026-04-05", end="2026-04-06".
+        summary: Display label. Defaults to "Focus Time".
+        description: Optional body text for context.
+        auto_decline_mode: "declineAllConflictingInvitations" (default),
+            "declineOnlyNewConflictingInvitations", or "declineNone".
+        decline_message: Body of auto-decline replies.
+        chat_status: "doNotDisturb" (default) or "available".
+        recurrence: RFC5545 rules, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
+        timezone: IANA zone like "America/New_York". Required when
+            start/end are date-only or lack a UTC offset.
+        time_min: List-action range start. Defaults to now.
+        time_max: List-action range end.
+        max_results: List-action cap. Default 10.
+        event_id: Event ID. Required for update and delete.
+        calendar_id: Default "primary". Focus Time lives on primary
+            calendars only — pass "primary" or the user's primary email.
 
     Returns:
-        str: Confirmation message with event details, or a formatted list of Focus Time events.
+        Confirmation with event summary/ID/link (create/update),
+        formatted list (list), or deletion confirmation.
     """
     action_lower = action.lower().strip()
     if action_lower == "create":
@@ -2336,19 +2403,31 @@ async def query_freebusy(
     group_expansion_max: Optional[int] = None,
     calendar_expansion_max: Optional[int] = None,
 ) -> str:
-    """
-    Returns free/busy information for a set of calendars.
+    """Query busy-time windows across one or more calendars.
+
+    Use this to find scheduling conflicts or free slots before creating an
+    event — it returns only busy periods, not event details. For event
+    details use get_events. This is the efficient way to compare
+    availability across multiple people/rooms. Requires the
+    calendar.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        time_min (str): The start of the interval for the query in RFC3339 format (e.g., '2024-05-12T10:00:00Z' or '2024-05-12').
-        time_max (str): The end of the interval for the query in RFC3339 format (e.g., '2024-05-12T18:00:00Z' or '2024-05-12').
-        calendar_ids (Optional[List[str]]): List of calendar identifiers to query. If not provided, queries the primary calendar. Use 'primary' for the user's primary calendar or specific calendar IDs obtained from `list_calendars`.
-        group_expansion_max (Optional[int]): Maximum number of calendar identifiers to be provided for a single group. Optional. An error is returned for a group with more members than this value. Maximum value is 100.
-        calendar_expansion_max (Optional[int]): Maximum number of calendars for which FreeBusy information is to be provided. Optional. Maximum value is 50.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        time_min: Interval start, RFC3339 ("2026-05-12T10:00:00Z" or
+            "2026-05-12").
+        time_max: Interval end, RFC3339.
+        calendar_ids: Calendars to query (primary calendar, room
+            resource IDs, or colleague emails if you have access).
+            Defaults to ["primary"].
+        group_expansion_max: Cap on members expanded from a Google group
+            identifier, up to 100.
+        calendar_expansion_max: Cap on calendars returned, up to 50.
 
     Returns:
-        str: A formatted response showing free/busy information for each requested calendar, including busy time periods.
+        Formatted block per calendar listing each busy period
+        (start → end) or "Status: Free" when none exist. Errors per
+        calendar (access denied, not found) are surfaced inline.
     """
     logger.info(
         f"[query_freebusy] Invoked. Email: '{user_google_email}', time_min: '{time_min}', time_max: '{time_max}'"
@@ -2442,17 +2521,28 @@ async def create_calendar(
     description: Optional[str] = None,
     timezone: Optional[str] = None,
 ) -> str:
-    """
-    Creates a new secondary Google Calendar.
+    """Create a new secondary calendar owned by the user.
+
+    Side effects: creates a new calendar and adds it to the user's
+    calendar list. To add events use manage_event with the returned
+    calendar_id. To share the calendar with others, use the Calendar web
+    UI or ACL APIs (not exposed by this tool). Requires the full
+    calendar OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        summary (str): The title/name of the new calendar.
-        description (Optional[str]): An optional description for the calendar.
-        timezone (Optional[str]): IANA timezone for the calendar (e.g. 'America/New_York').
+        user_google_email: The user's Google email address (authenticated
+            account).
+        summary: Calendar display name, e.g. "Client Meetings" or
+            "Personal - Fitness".
+        description: Optional longer description shown in calendar
+            settings.
+        timezone: IANA timezone string like "America/New_York" or
+            "Europe/London". Defaults to the account's default timezone
+            when omitted.
 
     Returns:
-        str: The ID and summary of the newly created calendar.
+        Confirmation line containing the new calendar's ID (pass to other
+        tools as calendar_id) and summary.
     """
     logger.info(
         f"[create_calendar] Invoked. Email: '{user_google_email}', summary: '{summary}'"

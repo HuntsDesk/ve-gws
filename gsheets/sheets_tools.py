@@ -46,15 +46,21 @@ async def list_spreadsheets(
     user_google_email: str,
     max_results: int = 25,
 ) -> str:
-    """
-    Lists spreadsheets from Google Drive that the user has access to.
+    """List accessible Google Sheets spreadsheets (most-recently-modified first).
+
+    Use this as a discovery step when the user only has a spreadsheet name
+    — the returned ID feeds get_spreadsheet_info, read_sheet_values, etc.
+    For a broader Drive search by name use search_drive_files with
+    file_type="sheet". Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        max_results (int): Maximum number of spreadsheets to return. Defaults to 25.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        max_results: Max spreadsheets to return. Default 25.
 
     Returns:
-        str: A formatted list of spreadsheet files (name, ID, modified time).
+        Formatted list with one line per spreadsheet: name, ID, last
+        modified time, and webViewLink.
     """
     logger.info(f"[list_spreadsheets] Invoked. Email: '{user_google_email}'")
 
@@ -99,15 +105,24 @@ async def get_spreadsheet_info(
     user_google_email: str,
     spreadsheet_id: str,
 ) -> str:
-    """
-    Gets information about a specific spreadsheet including its sheets.
+    """Inspect a spreadsheet's metadata (title, locale, tabs, sizes).
+
+    Use this to discover sheet (tab) names and sheetIds before calling
+    read_sheet_values, manage_sheet_tabs, or protect_sheet_range. Also
+    surfaces conditional format counts per tab. Does not read cell
+    values — use read_sheet_values for that. Requires the
+    spreadsheets.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet to get info for. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Spreadsheet ID from list_spreadsheets or a URL
+            like docs.google.com/spreadsheets/d/<id>/edit.
 
     Returns:
-        str: Formatted spreadsheet information including title, locale, and sheets list.
+        Block with spreadsheet title, locale, and per-tab details: sheet
+        name, sheetId, row x column size, and conditional-format count.
+        When formats exist, their summary is inlined.
     """
     logger.info(
         f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}"
@@ -181,23 +196,33 @@ async def read_sheet_values(
     include_notes: bool = False,
     include_formulas: bool = False,
 ) -> str:
-    """
-    Reads values from a specific range in a Google Sheet.
+    """Read cell values from an A1 range (optionally with formulas/notes).
+
+    Output is capped at 50 rows for readability — widen the range or
+    paginate manually for more. For writing use modify_sheet_values. For
+    appending to a table use append_table_rows. Requires the
+    spreadsheets.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet. Required.
-        range_name (str): The range to read (e.g., "Sheet1!A1:D10", "A1:D10"). Defaults to "A1:Z1000".
-        include_hyperlinks (bool): If True, also fetch hyperlink metadata for the range.
-            Defaults to False to avoid expensive includeGridData requests.
-        include_notes (bool): If True, also fetch cell notes for the range.
-            Defaults to False to avoid expensive includeGridData requests.
-        include_formulas (bool): If True, also fetch raw formula strings for cells that
-            contain formulas. Useful for identifying cross-sheet references before writing
-            back to a range. Defaults to False to avoid an extra API request.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Spreadsheet ID from list_spreadsheets.
+        range_name: A1 notation, e.g. "Sheet1!A1:D10", "A:D", or unqualified
+            "A1:D10" (first sheet). Default "A1:Z1000".
+        include_hyperlinks: True adds a hyperlink-metadata section for
+            cells containing URLs. Triggers an includeGridData request —
+            more expensive.
+        include_notes: True adds a cell-notes section. Same cost caveat
+            as include_hyperlinks.
+        include_formulas: True fetches raw formula strings (=SUM(...), etc.)
+            alongside displayed values — useful before writing back to
+            avoid clobbering cross-sheet references.
 
     Returns:
-        str: The formatted values from the specified range.
+        Table-style output with row indices and displayed values (capped
+        at 50 rows; truncation note appended when cut). Optional sections
+        for hyperlinks, notes, formulas, and Sheets #ERROR details when
+        error tokens are detected in values.
     """
     logger.info(
         f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}"
@@ -296,19 +321,32 @@ async def modify_sheet_values(
     value_input_option: str = "USER_ENTERED",
     clear_values: bool = False,
 ) -> str:
-    """
-    Modifies values in a specific range of a Google Sheet - can write, update, or clear values.
+    """Write, overwrite, or clear values in an A1 range.
+
+    Side effects: overwrites existing cells in the exact range. To append
+    new rows to a table use append_table_rows instead. For formatting use
+    format_sheet_range. Requires the spreadsheets OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet. Required.
-        range_name (str): The range to modify (e.g., "Sheet1!A1:D10", "A1:D10"). Required.
-        values (Optional[Union[str, List[List[str]]]]): 2D array of values to write/update. Can be a JSON string or Python list. Required unless clear_values=True.
-        value_input_option (str): How to interpret input values ("RAW" or "USER_ENTERED"). Defaults to "USER_ENTERED".
-        clear_values (bool): If True, clears the range instead of writing values. Defaults to False.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Spreadsheet ID.
+        range_name: A1 range, e.g. "Sheet1!A1:D10". Range extent
+            determines how many cells are overwritten regardless of
+            values length — for example a 10x4 range clears leftover
+            cells not covered by values.
+        values: 2D array of row arrays (e.g. [["a", "b"], ["c", "d"]]),
+            or a JSON string. Required unless clear_values=True.
+        value_input_option: "USER_ENTERED" (default — strings parsed as
+            dates/numbers/formulas, matches typing into the UI) or "RAW"
+            (strings stored verbatim; formulas stored as literal text).
+        clear_values: True clears the range instead of writing. Ignores
+            `values`.
 
     Returns:
-        str: Confirmation message of the successful modification operation.
+        Confirmation with updated cell/row/column counts, or cleared
+        range confirmation. When Sheets returns #ERROR tokens, a detail
+        section explains each.
     """
     operation = "clear" if clear_values else "write"
     logger.info(
@@ -1139,16 +1177,24 @@ async def create_spreadsheet(
     title: str,
     sheet_names: Optional[StringList] = None,
 ) -> str:
-    """
-    Creates a new Google Spreadsheet.
+    """Create a brand-new empty Google Spreadsheet in My Drive.
+
+    Side effects: creates a new file owned by the authenticated user in
+    My Drive root. To add tabs to an existing spreadsheet use create_sheet.
+    To upload an existing .xlsx use create_drive_file or
+    import_to_google_doc (for content) instead. Requires the
+    spreadsheets OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        title (str): The title of the new spreadsheet. Required.
-        sheet_names (Optional[List[str]]): List of sheet names to create. If not provided, creates one sheet with default name.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        title: Display title for the new spreadsheet.
+        sheet_names: Initial tab names. When omitted, one default tab is
+            created ("Sheet1"). Example: ["Raw Data", "Summary", "Charts"].
 
     Returns:
-        str: Information about the newly created spreadsheet including ID, URL, and locale.
+        Confirmation with the new spreadsheet's title, ID, URL, and
+        locale. Use the ID with other sheets tools.
     """
     logger.info(
         f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}"
@@ -1195,16 +1241,23 @@ async def create_sheet(
     spreadsheet_id: str,
     sheet_name: str,
 ) -> str:
-    """
-    Creates a new sheet within an existing spreadsheet.
+    """Add a new tab (sheet) to an existing spreadsheet.
+
+    Side effects: appends a new tab at the end. To rename/reorder/delete
+    tabs use manage_sheet_tabs. For a brand-new spreadsheet use
+    create_spreadsheet. Requires the spreadsheets OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet. Required.
-        sheet_name (str): The name of the new sheet. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Target spreadsheet ID.
+        sheet_name: Display name for the new tab. Must be unique within
+            the spreadsheet.
 
     Returns:
-        str: Confirmation message of the successful sheet creation.
+        Confirmation line with the new tab's name and its sheetId (pass
+        this numeric ID to tools that require it, like
+        protect_sheet_range).
     """
     logger.info(
         f"[create_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Sheet: {sheet_name}"
@@ -1248,16 +1301,20 @@ async def list_sheet_tables(
     user_google_email: str,
     spreadsheet_id: str,
 ) -> str:
-    """
-    Lists all structured tables in a spreadsheet with their IDs, names, ranges,
-    and column details. Use this to find table IDs for append_table_rows.
+    """List all structured tables (native Sheets tables) in a spreadsheet.
+
+    A "table" here is the newer native Sheets Table feature, not any
+    bounded range. Use this to discover table_id before calling
+    append_table_rows. Requires the spreadsheets.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Target spreadsheet ID.
 
     Returns:
-        str: Formatted list of tables with their IDs, names, ranges, and columns.
+        Formatted per-table block: Table ID, name, parent sheet, row/col
+        range, and column names. "No tables found" when none exist.
     """
     logger.info(
         f"[list_sheet_tables] Invoked. Email: '{user_google_email}', "
@@ -1326,21 +1383,27 @@ async def append_table_rows(
     table_id: str,
     values: Union[str, List[List]],
 ) -> str:
-    """
-    Appends rows to a structured table in a Google Sheet. The rows are added
-    to the end of the table body, automatically extending the table range.
+    """Append rows to a structured Sheets table, auto-extending its range.
 
-    Use list_sheet_tables first to find the table ID.
+    Side effects: mutates the table — new rows are added after the last
+    existing row and the table range grows to include them. Values are
+    typed automatically: bool → boolean, numeric → number, strings
+    starting with "=" → formula, otherwise string. For plain range
+    writes use modify_sheet_values. Requires the spreadsheets OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        spreadsheet_id (str): The ID of the spreadsheet. Required.
-        table_id (str): The ID of the table to append to (get from list_sheet_tables). Required.
-        values (Union[str, List[List]]): 2D array of values to append. Each inner
-            list is one row. Can be a JSON string or Python list. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Target spreadsheet ID.
+        table_id: Table ID from list_sheet_tables (a numeric string;
+            distinct from sheetId).
+        values: 2D list (each inner list = one row of cell values) or a
+            JSON-encoded version of same. Column count should match the
+            table.
 
     Returns:
-        str: Confirmation message with the number of rows appended.
+        Confirmation line with number of rows appended.
     """
     logger.info(
         f"[append_table_rows] Invoked. Email: '{user_google_email}', "
@@ -2079,21 +2142,37 @@ async def add_sheet_data_validation(
     show_dropdown: bool = True,
     input_message: Optional[str] = None,
 ) -> str:
-    """
-    Add data validation rules to a cell range (dropdowns, number bounds, custom formulas).
+    """Apply a data-validation rule to a range (dropdowns, bounds, formulas).
+
+    Side effects: replaces any existing validation on the range. For
+    conditional formatting (color rules) use manage_conditional_formatting.
+    For protecting cells from edits use protect_sheet_range. Requires the
+    spreadsheets OAuth scope.
 
     Args:
-        spreadsheet_id: ID of the spreadsheet.
-        range_name: A1 range (e.g., "Sheet1!A1:A10" or "A1:A10").
-        validation_type: One of ONE_OF_LIST, NUMBER_BETWEEN, NUMBER_GREATER,
-            NUMBER_LESS, NUMBER_EQ, TEXT_CONTAINS, TEXT_EQ, DATE_AFTER, DATE_BEFORE,
-            DATE_ON_OR_AFTER, DATE_ON_OR_BEFORE, CUSTOM_FORMULA, BOOLEAN.
-        values: List of allowed values (for ONE_OF_LIST) or bounds (for NUMBER_BETWEEN
-            pass [min, max]). For single-value conditions, pass [value].
-        custom_formula: For CUSTOM_FORMULA type, the formula (e.g., "=A1>0").
-        strict: If True, rejects invalid input. If False, shows a warning.
-        show_dropdown: For ONE_OF_LIST, whether to show the dropdown UI.
-        input_message: Optional help text shown on hover.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        spreadsheet_id: Target spreadsheet ID.
+        range_name: A1 range, e.g. "Sheet1!A1:A10" or "A1:A10".
+        validation_type: ONE_OF_LIST, NUMBER_BETWEEN, NUMBER_GREATER,
+            NUMBER_LESS, NUMBER_EQ, TEXT_CONTAINS, TEXT_EQ, DATE_AFTER,
+            DATE_BEFORE, DATE_ON_OR_AFTER, DATE_ON_OR_BEFORE,
+            CUSTOM_FORMULA, or BOOLEAN.
+        values: For ONE_OF_LIST: allowed dropdown options. For
+            NUMBER_BETWEEN: [min, max]. For single-value conditions:
+            [value]. Ignored for BOOLEAN and CUSTOM_FORMULA.
+        custom_formula: For CUSTOM_FORMULA only — an expression returning
+            TRUE to allow, e.g. "=A1>0" or "=REGEXMATCH(A1,\"^\\d+$\")".
+        strict: True rejects invalid input outright. False shows a
+            warning but accepts the entry.
+        show_dropdown: For ONE_OF_LIST — True (default) renders the
+            dropdown arrow; False hides it while still enforcing the
+            rule.
+        input_message: Optional help text shown when the cell is
+            focused.
+
+    Returns:
+        Confirmation line with the validation type and range applied.
     """
     logger.info(
         f"[add_sheet_data_validation] spreadsheet='{spreadsheet_id}' range='{range_name}' type='{validation_type}'"

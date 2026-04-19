@@ -151,22 +151,30 @@ async def get_doc_content(
     document_id: str,
     suggestions_view_mode: str = "DEFAULT_FOR_CURRENT_ACCESS",
 ) -> str:
-    """
-    Retrieves content of a Google Doc or a Drive file (like .docx) identified by document_id.
-    - Native Google Docs: Fetches content via Docs API.
-    - Office files (.docx, etc.) stored in Drive: Downloads via Drive API and extracts text.
+    """Retrieve Doc body text (native Google Docs or Drive-stored .docx).
+
+    For native Google Docs uses the Docs API and walks tabs (including
+    nested child tabs). For non-native Drive files (.docx, etc.) falls
+    back to the Drive download + text extraction path. For markdown
+    output use get_doc_as_markdown; for structural inspection (style,
+    headings, objects) use inspect_doc_structure. Requires both
+    drive.readonly and docs.readonly OAuth scopes.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the Google Doc (or full URL)
-        suggestions_view_mode: How to render suggestions in the returned content:
-            - "DEFAULT_FOR_CURRENT_ACCESS": Default based on user's access level
-            - "SUGGESTIONS_INLINE": Suggested changes appear inline in the document
-            - "PREVIEW_SUGGESTIONS_ACCEPTED": Preview as if all suggestions were accepted
-            - "PREVIEW_WITHOUT_SUGGESTIONS": Preview as if all suggestions were rejected
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Doc ID or a full URL like
+            docs.google.com/document/d/<id>/edit (either is accepted).
+        suggestions_view_mode: How tracked-changes are rendered:
+            "DEFAULT_FOR_CURRENT_ACCESS" (default), "SUGGESTIONS_INLINE"
+            (show suggestions inline), "PREVIEW_SUGGESTIONS_ACCEPTED"
+            (render as if accepted), or "PREVIEW_WITHOUT_SUGGESTIONS"
+            (render as if rejected).
 
     Returns:
-        str: The document content with metadata header.
+        Plain text body with a metadata header (name, ID, web link) and
+        tab delimiters "--- TAB: <name> (ID: <tabId>) ---" for multi-tab
+        documents.
     """
     validation_error = validate_suggestions_view_mode(suggestions_view_mode)
     if validation_error:
@@ -920,21 +928,32 @@ async def insert_doc_elements(
     list_type: str = None,
     text: str = None,
 ) -> str:
-    """
-    Inserts structural elements like tables, lists, or page breaks into a Google Doc.
+    """Insert a table, list, or page break into a Google Doc.
+
+    For plain text or inline markdown use modify_doc_text (with
+    format_as_markdown=True for rich output). For images use
+    insert_doc_image. For Drive-file chips use insert_doc_file_chip.
+    Note: index 0 is automatically bumped to 1 (to skip the opening
+    section break). Requires the documents OAuth scope.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the document to update
-        element_type: Type of element to insert ("table", "list", "page_break")
-        index: Position to insert element (0-based)
-        rows: Number of rows for table (required for table)
-        columns: Number of columns for table (required for table)
-        list_type: Type of list ("UNORDERED", "ORDERED") (required for list)
-        text: Initial text content for list items
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        element_type: "table", "list", or "page_break".
+        index: 0-based insertion index. Get stable positions from
+            inspect_doc_structure. Index 0 is auto-bumped to 1.
+        rows: Row count for a table. Required when element_type="table".
+        columns: Column count for a table. Required when
+            element_type="table".
+        list_type: "UNORDERED" (bullets) or "ORDERED" (numbered).
+            Required when element_type="list".
+        text: Seed text for a list item. Defaults to "List item" when
+            list_type is set but text is omitted.
 
     Returns:
-        str: Confirmation message with insertion details
+        Confirmation naming the element inserted, its index, and an edit
+        link.
     """
     logger.info(
         f"[insert_doc_elements] Doc={document_id}, type={element_type}, index={index}"
@@ -1010,19 +1029,29 @@ async def insert_doc_image(
     width: int = 0,
     height: int = 0,
 ) -> str:
-    """
-    Inserts an image into a Google Doc from Drive or a URL.
+    """Insert an image into a Google Doc from Drive or an HTTPS URL.
+
+    When image_source is a Drive file ID, its sharing MUST allow "Anyone
+    with the link" — check with check_drive_file_public_access first.
+    HTTPS URLs must serve image bytes directly (no redirects, login walls,
+    or signed URLs). PNG/JPEG/GIF supported. Index 0 is auto-bumped to 1.
+    Requires both docs and drive.readonly OAuth scopes.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the document to update
-        image_source: Drive file ID or public image URL
-        index: Position to insert image (0-based)
-        width: Image width in points (optional)
-        height: Image height in points (optional)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        image_source: Drive file ID (non-URL string) or public HTTPS
+            image URL. Drive IDs are auto-converted to
+            https://drive.google.com/uc?id=<id>.
+        index: 0-based insertion index from inspect_doc_structure.
+            0 auto-bumped to 1.
+        width: Image width in points. 0 or omitted = auto-size.
+        height: Image height in points. 0 or omitted = auto-size.
 
     Returns:
-        str: Confirmation message with insertion details
+        Confirmation naming the source (Drive filename or "URL image"),
+        applied size, insertion index, and an edit link.
     """
     logger.info(
         f"[insert_doc_image] Doc={document_id}, source={image_source}, index={index}"
@@ -1973,17 +2002,27 @@ async def export_doc_to_pdf(
     pdf_filename: str = None,
     folder_id: str = None,
 ) -> str:
-    """
-    Exports a Google Doc to PDF format and saves it to Google Drive.
+    """Export a Google Doc as PDF and save the PDF back into Drive.
+
+    Side effects: creates a new PDF file in Drive (separate file from the
+    Doc — the Doc itself is untouched). To download bytes without saving
+    use get_drive_file_download_url with export_format="pdf". To convert
+    the source to DOCX or other formats use get_drive_file_download_url.
+    Requires both docs (read) and drive.file OAuth scopes.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the Google Doc to export
-        pdf_filename: Name for the PDF file (optional - if not provided, uses original name + "_PDF")
-        folder_id: Drive folder ID to save PDF in (optional - if not provided, saves in root)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Google Doc ID (must be a native Doc — .docx stored
+            in Drive is rejected).
+        pdf_filename: Name for the generated PDF. Defaults to
+            "<original>_PDF.pdf". ".pdf" extension is auto-appended.
+        folder_id: Drive folder to save the PDF into. Defaults to My
+            Drive root.
 
     Returns:
-        str: Confirmation message with PDF file details and links
+        Confirmation with the new PDF's filename, size, Drive file ID,
+        and webViewLink.
     """
     logger.info(
         f"[export_doc_to_pdf] Email={user_google_email}, Doc={document_id}, pdf_filename={pdf_filename}, folder_id={folder_id}"
@@ -2514,18 +2553,27 @@ async def insert_doc_tab(
     index: int,
     parent_tab_id: Optional[str] = None,
 ) -> str:
-    """
-    Inserts a new tab into a Google Doc.
+    """Create a new tab in a multi-tab Google Doc.
+
+    Side effects: creates a new empty tab (a sub-document) in the target
+    Doc. Google Docs tabs (introduced Oct 2024) let one Doc hold
+    multiple sub-documents. To list existing tabs + IDs use list_doc_tabs;
+    to rename use update_doc_tab; to delete use delete_doc_tab. Requires
+    the documents OAuth scope.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the document to update
-        title: Title of the new tab
-        index: Position index for the new tab (0-based among sibling tabs)
-        parent_tab_id: Optional ID of a parent tab to nest the new tab under
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        title: Display title of the new tab.
+        index: 0-based position among sibling tabs. 0 = first; use a
+            large number to append at the end.
+        parent_tab_id: Parent tab's tabId (from list_doc_tabs) to nest
+            the new tab as a child. Omit for a top-level tab.
 
     Returns:
-        str: Confirmation message with document link
+        Confirmation with the new tab's title, index, returned tabId
+        (pass to other tools as tab_id), and an edit link.
     """
     logger.info(f"[insert_doc_tab] Doc={document_id}, title='{title}', index={index}")
 
@@ -2561,16 +2609,22 @@ async def delete_doc_tab(
     document_id: str,
     tab_id: str,
 ) -> str:
-    """
-    Deletes a tab from a Google Doc by its tab ID.
+    """Delete a tab (and its entire sub-document) from a Google Doc.
+
+    Side effects: PERMANENTLY removes the tab and all its content —
+    UI-undo via Edit > Undo still works if the caller has the Doc open,
+    but there is no API undo. To just rename a tab use update_doc_tab.
+    Requires the documents OAuth scope.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the document to update
-        tab_id: ID of the tab to delete (use inspect_doc_structure to find tab IDs)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        tab_id: Tab ID to delete. Get from list_doc_tabs or
+            inspect_doc_structure.
 
     Returns:
-        str: Confirmation message with document link
+        Confirmation with the deleted tab ID and an edit link.
     """
     logger.info(f"[delete_doc_tab] Doc={document_id}, tab_id='{tab_id}'")
 
@@ -2595,17 +2649,21 @@ async def update_doc_tab(
     tab_id: str,
     title: str,
 ) -> str:
-    """
-    Renames a tab in a Google Doc.
+    """Rename an existing tab in a Google Doc.
+
+    Changes the tab's display title only — does not move or delete its
+    content. For creating tabs use insert_doc_tab; for deleting use
+    delete_doc_tab. Requires the documents OAuth scope.
 
     Args:
-        user_google_email: User's Google email address
-        document_id: ID of the document to update
-        tab_id: ID of the tab to rename (use inspect_doc_structure to find tab IDs)
-        title: New title for the tab
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        tab_id: Tab ID from list_doc_tabs.
+        title: New display title.
 
     Returns:
-        str: Confirmation message with document link
+        Confirmation with old tab ID, new title, and an edit link.
     """
     logger.info(
         f"[update_doc_tab] Doc={document_id}, tab_id='{tab_id}', title='{title}'"
@@ -2710,25 +2768,32 @@ async def insert_doc_markdown(
     segment_id: Optional[str] = None,
     end_of_segment: bool = False,
 ) -> str:
-    """
-    Insert markdown content into a Google Doc with native formatting applied.
+    """Insert markdown-formatted content into a Google Doc with native styling.
 
-    Supports `# H1`-`### H3`, `**bold**`, `*italic*`, `- bullets`, `1. numbered`,
-    and `- [ ] checkbox` (also `- [x]`).
-    Converts markdown into Google Docs API batch requests so headings, lists,
-    and text emphasis render as proper Docs styles rather than raw markdown text.
+    Converts markdown to Docs API batch requests so output renders with
+    real Docs styles (headings, bold, lists), not raw markdown. For plain
+    text insertion use modify_doc_text; for find-and-replace patterns use
+    find_and_replace_doc. Supports `# H1`..`### H3`, `**bold**`,
+    `*italic*`, `- bullets`, `1. numbered`, and `- [ ] checkbox` (plus
+    `- [x]`). Requires the documents OAuth scope.
 
     Args:
-        document_id: ID of the document.
-        markdown: Markdown content to insert.
-        index: Document index at which to insert (default 1 — start of body).
-            Ignored when end_of_segment=True.
-        tab_id: Optional tab ID to target a specific tab.
-        segment_id: Optional header/footer/footnote segment ID.
-        end_of_segment: If True, append to the end of the targeted segment/body
-            without needing to calculate an index. Most reliable for empty
-            segments; for non-empty segments, use inspect_doc_structure first
-            to find the exact insertion index.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        markdown: Markdown source to insert.
+        index: 1-based document index to insert at. Default 1 (start of
+            body). Ignored when end_of_segment=True.
+        tab_id: Tab ID from list_doc_tabs to target a specific tab.
+        segment_id: Header/footer/footnote segment ID from
+            inspect_doc_structure (do not invent IDs).
+        end_of_segment: True appends to the end of the target segment
+            without needing to calculate an index — safest for repeatable
+            inserts.
+
+    Returns:
+        Confirmation with the character count inserted, number of API
+        requests issued, insertion location, and an edit link.
     """
     logger.info(
         f"[insert_doc_markdown] Doc={document_id}, index={index}, md_len={len(markdown)}, "
@@ -2770,15 +2835,27 @@ async def insert_doc_link(
     index: int = 1,
     tab_id: Optional[str] = None,
 ) -> str:
-    """
-    Insert clickable linked text at a specified index in a document.
+    """Insert clickable hyperlink text at a given document index.
+
+    Use this for a simple hyperlink; for a Drive-file smart chip use
+    insert_doc_file_chip; for a person @mention chip use
+    insert_doc_person_chip. Requires the documents OAuth scope.
 
     Args:
-        document_id: ID of the document.
-        text: The visible text for the link.
-        url: The target URL (http/https/mailto supported).
-        index: Document index at which to insert the link. Defaults to 1.
-        tab_id: Optional tab ID to scope the insertion to.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        text: Visible link text inserted into the document.
+        url: Target URL — http://, https://, or mailto: schemes
+            supported.
+        index: 1-based document index where the text is inserted.
+            Default 1 (start of body). Get stable indices from
+            inspect_doc_structure.
+        tab_id: Tab ID from list_doc_tabs to target a specific tab.
+
+    Returns:
+        Confirmation with the inserted text, URL, index, and an edit
+        link.
     """
     logger.info(
         f"[insert_doc_link] Doc={document_id}, index={index}, url={url}"
@@ -2907,18 +2984,29 @@ async def insert_doc_file_chip(
     index: int = 1,
     tab_id: Optional[str] = None,
 ) -> str:
-    """
-    Insert a Drive file smart chip at the specified index.
+    """Insert a Drive-file smart chip at an index in a Google Doc.
 
-    A Drive file URL inserted as linked text auto-converts into a file chip
-    in Google Docs, showing the file's name, icon, and preview.
+    Side effect note: chip rendering happens client-side — the API stores
+    a linked URL, and Google Docs upgrades it to a chip with filename/
+    icon/preview on the next render. For a person @mention use
+    insert_doc_person_chip; for a plain hyperlink use insert_doc_link.
+    Requires the documents OAuth scope.
 
     Args:
-        document_id: ID of the document.
-        file_url: Full Drive file URL (e.g. "https://docs.google.com/document/d/.../edit").
-        display_text: Optional visible text for the link. Defaults to the URL.
-        index: Document index at which to insert.
-        tab_id: Optional tab ID to scope the insertion to.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        document_id: Target document ID.
+        file_url: Full Drive URL, e.g. a share/edit URL like
+            https://docs.google.com/document/d/<id>/edit,
+            https://drive.google.com/file/d/<id>/view, or a Sheets/Slides
+            URL.
+        display_text: Optional visible anchor text. Defaults to the URL
+            itself (still renders as a chip on next open).
+        index: 1-based document index to insert at. Default 1.
+        tab_id: Tab ID from list_doc_tabs to scope to a specific tab.
+
+    Returns:
+        Confirmation with the target URL, index, and document ID.
     """
     logger.info(
         f"[insert_doc_file_chip] Doc={document_id}, url={file_url}, index={index}"

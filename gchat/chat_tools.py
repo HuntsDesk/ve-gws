@@ -223,19 +223,33 @@ async def get_messages(
     order_by: str = "createTime desc",
     message_filter: Optional[str] = None,
 ) -> str:
-    """
-    Retrieves messages from a Google Chat space.
+    """List messages in a Google Chat space with sender names resolved.
+
+    Use this to read a room/DM's recent messages. For text search across
+    spaces use search_messages. For sending messages use send_message.
+    For attachment downloads use download_chat_attachment. Senders are
+    resolved to display names via the People API (both chat.read and
+    contacts.readonly OAuth scopes required).
 
     Args:
-        message_filter: Optional filter string using the Chat API filter syntax.
-                        Supports createTime and thread.name.
-                        Examples:
-                          'createTime > "2026-03-18T00:00:00-03:00"'
-                          'createTime > "2026-03-18T00:00:00-03:00" AND createTime < "2026-03-19T00:00:00-03:00"'
-                          'thread.name = spaces/X/threads/Y'
+        user_google_email: The user's Google email address (authenticated
+            account).
+        space_id: Space resource name from list_spaces, formatted as
+            "spaces/<id>".
+        page_size: Max messages returned. Default 50.
+        order_by: "createTime desc" (default, newest first) or
+            "createTime" (oldest first).
+        message_filter: Chat API filter expression. Supports createTime
+            and thread.name, e.g.
+            'createTime > "2026-03-18T00:00:00Z"' or
+            'thread.name = spaces/X/threads/Y'. Full-text search is NOT
+            supported here — use search_messages.
 
     Returns:
-        str: Formatted messages from the specified space.
+        Formatted block per message with timestamp, resolved sender name,
+        text, rich-link URLs, attachments (with download instructions),
+        thread reference (when threaded), emoji reactions, and the
+        Message ID for follow-up calls.
     """
     logger.info(f"[get_messages] Space ID: '{space_id}' for user '{user_google_email}'")
 
@@ -329,15 +343,30 @@ async def send_message(
     thread_key: Optional[str] = None,
     thread_name: Optional[str] = None,
 ) -> str:
-    """
-    Sends a message to a Google Chat space.
+    """Post a text message to a Google Chat space (optionally threaded).
+
+    Side effects: creates a new visible message in the space. For adding
+    an emoji reaction to an existing message use create_reaction. For
+    listing what's in a space use get_messages. Requires the
+    chat.messages.create (chat_write) OAuth scope.
 
     Args:
-        thread_name: Reply in an existing thread by its resource name (e.g. spaces/X/threads/Y).
-        thread_key: Reply in a thread by app-defined key (creates thread if not found).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        space_id: Target space resource name ("spaces/<id>") from
+            list_spaces.
+        message_text: Plain text body. Supports Chat markdown (e.g.
+            *bold*, _italic_, `code`).
+        thread_key: App-defined thread key — messages with the same key
+            thread together. If no thread exists with this key, a new
+            one is created. Mutually exclusive with thread_name.
+        thread_name: Resource name of an existing thread
+            ("spaces/X/threads/Y") to reply to. Falls back to a new
+            thread if the specified one is not found.
 
     Returns:
-        str: Confirmation message with sent message details.
+        Confirmation with the new Message ID (resource name) and
+        createTime.
     """
     logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
 
@@ -389,21 +418,33 @@ async def search_messages(
     time_filter: Optional[str] = None,
     max_spaces: int = 10,
 ) -> str:
-    """
-    Searches for messages in Google Chat spaces by text content and/or time range.
+    """Search Chat messages across one or many spaces by text and/or time.
+
+    The Chat API does not support server-side full-text search, so this
+    tool fetches messages per space (with optional createTime filter
+    applied server-side) and does a case-insensitive substring match on
+    message text client-side. For a single space list without filtering
+    use get_messages. Requires both chat.read and contacts.readonly
+    OAuth scopes (senders are resolved to names via People API).
 
     Args:
-        query: Optional text to search for. If omitted, only time_filter is applied.
-        space_id: Optional space to restrict the search to.
-        page_size: Maximum number of messages to return per space.
-        time_filter: Optional filter using Chat API createTime syntax.
-                     Examples:
-                       'createTime > "2026-03-18T00:00:00-03:00"'
-                       'createTime > "2026-03-18T00:00:00-03:00" AND createTime < "2026-03-19T00:00:00-03:00"'
-        max_spaces: Maximum number of spaces to search when space_id is not provided (default 10).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        query: Case-insensitive substring to match in message text. Omit
+            to return messages by time only.
+        space_id: Restrict search to one space ("spaces/<id>"). Omit to
+            search across accessible spaces (capped by max_spaces).
+        page_size: Max messages fetched per space. Default 25.
+        time_filter: Chat API createTime expression, e.g.
+            'createTime > "2026-03-18T00:00:00Z"' or a range joined
+            with AND. Applied server-side.
+        max_spaces: When space_id is omitted, cap on how many spaces
+            are scanned. Default 10.
 
     Returns:
-        str: A formatted list of messages matching the search criteria.
+        Formatted list with one line per match: timestamp, sender, space
+        name, truncated text (100 chars + ellipsis), plus rich-link
+        and attachment markers inline.
     """
     logger.info(
         f"[search_messages] Email={user_google_email}, Query='{query}', TimeFilter='{time_filter}'"
@@ -555,15 +596,25 @@ async def create_reaction(
     message_id: str,
     emoji_unicode: str,
 ) -> str:
-    """
-    Adds an emoji reaction to a Google Chat message.
+    """Add an emoji reaction to a Chat message.
+
+    Side effects: creates a reaction visible to everyone in the space.
+    Custom Workspace emoji are not supported here (Unicode only). For
+    posting a new message use send_message. Requires the chat_write
+    OAuth scope.
 
     Args:
-        message_id: The message resource name (e.g. spaces/X/messages/Y).
-        emoji_unicode: The emoji character to react with (e.g. 👍).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        message_id: Message resource name
+            ("spaces/<space>/messages/<msg>") from get_messages or
+            search_messages.
+        emoji_unicode: Single Unicode emoji character, e.g. "\U0001F44D"
+            (thumbs up) or a literal emoji like a smiley.
 
     Returns:
-        str: Confirmation message.
+        Confirmation with the emoji, target message ID, and new
+        reaction resource name.
     """
     logger.info(f"[create_reaction] Message: '{message_id}', Emoji: '{emoji_unicode}'")
 
@@ -591,18 +642,27 @@ async def download_chat_attachment(
     message_id: str,
     attachment_index: int = 0,
 ) -> str:
-    """
-    Downloads an attachment from a Google Chat message and saves it to local disk.
+    """Download a Chat message attachment to disk or expose via URL.
 
-    In stdio mode, returns the local file path for direct access.
-    In HTTP mode, returns a temporary download URL (valid for 1 hour).
+    Side effects: writes a file to the configured attachment storage
+    (stdio mode) or publishes a 1-hour download URL (HTTP mode). In
+    stateless mode, returns a base64 preview. Use get_messages to
+    discover the message ID and per-message attachment indices.
+    Requires the chat_read OAuth scope.
 
     Args:
-        message_id: The message resource name (e.g. spaces/X/messages/Y).
-        attachment_index: Zero-based index of the attachment to download (default 0).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        message_id: Message resource name
+            ("spaces/<space>/messages/<msg>") from get_messages.
+        attachment_index: 0-based index into the message's attachments
+            list. Default 0 (first attachment).
 
     Returns:
-        str: Attachment metadata with either a local file path or download URL.
+        Block with filename, content type, size in KB, and either a
+        local file path (stdio) or a 1-hour download URL (HTTP).
+        Validation errors surface inline (no attachments, index out of
+        range).
     """
     logger.info(
         f"[download_chat_attachment] Message: '{message_id}', Index: {attachment_index}"

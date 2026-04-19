@@ -142,38 +142,46 @@ async def search_drive_files(
     detailed: bool = True,
     order_by: Optional[str] = None,
 ) -> str:
-    """
-    Searches for files and folders within a user's Google Drive, including shared drives.
+    """Search Drive (including shared drives) for files and folders.
+
+    Free-text queries are auto-wrapped in `fullText contains '...'`;
+    structured Drive queries pass through as-is. For listing a single
+    folder by parent use list_drive_items. For file content use
+    get_drive_file_content. Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        query (str): The search query string. Supports Google Drive search operators.
-                     NOTE: Owner-based queries ('user@example.com' in owners) DO NOT WORK in Shared Drives
-                     because files are owned by the shared drive itself, not individual users.
-                     For recent files by a specific user in Shared Drives, search by modifiedTime
-                     and use order_by='modifiedTime desc' instead.
-        page_size (int): The maximum number of files to return. Defaults to 10.
-        page_token (Optional[str]): Page token from a previous response's nextPageToken to retrieve the next page of results.
-        drive_id (Optional[str]): ID of the shared drive to search. If None, behavior depends on `corpora` and `include_items_from_all_drives`.
-        include_items_from_all_drives (bool): Whether shared drive items should be included in results. Defaults to True. This is effective when not specifying a `drive_id`.
-        corpora (Optional[str]): Bodies of items to query (e.g., 'user', 'domain', 'drive', 'allDrives').
-                                 If 'drive_id' is specified and 'corpora' is None, it defaults to 'drive'.
-                                 Otherwise, Drive API default behavior applies. Prefer 'user' or 'drive' over 'allDrives' for efficiency.
-        file_type (Optional[str]): Restrict results to a specific file type. Accepts a friendly
-                                   name ('folder', 'document'/'doc', 'spreadsheet'/'sheet',
-                                   'presentation'/'slides', 'form', 'drawing', 'pdf', 'shortcut',
-                                   'script', 'site', 'jam'/'jamboard') or any raw MIME type
-                                   string (e.g. 'application/pdf'). Defaults to None (all types).
-        detailed (bool): Whether to include size, modified time, and link in results. Defaults to True.
-        order_by (Optional[str]): Sort order. Comma-separated list of sort keys with optional 'desc' modifier.
-                                  Valid keys: 'createdTime', 'folder', 'modifiedByMeTime', 'modifiedTime',
-                                  'name', 'name_natural', 'quotaBytesUsed', 'recency', 'sharedWithMeTime',
-                                  'starred', 'viewedByMeTime'. Example: 'modifiedTime desc' or 'folder,modifiedTime desc,name'.
-                                  Defaults to None (Drive API default ordering).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        query: Free text (auto-wrapped) or a Drive query expression like
+            `name contains 'Q3' and mimeType = 'application/pdf' and
+            modifiedTime > '2026-01-01T00:00:00'`. Owner-based queries
+            ("x@y.com in owners") do NOT work inside shared drives —
+            search by modifiedTime and order_by="modifiedTime desc"
+            instead.
+        page_size: Max files returned, 1-1000. Default 10.
+        page_token: Cursor from a prior response's `nextPageToken`.
+        drive_id: Shared drive ID to restrict the search. Omit for My
+            Drive + shared-with-me.
+        include_items_from_all_drives: True (default) to include shared
+            drive items when drive_id is omitted.
+        corpora: Scope — "user", "domain", "drive", or "allDrives".
+            Defaults to "drive" when drive_id is set. Prefer "user" or
+            "drive" over "allDrives" for performance.
+        file_type: Friendly alias ("folder", "doc", "sheet", "slides",
+            "form", "drawing", "pdf", "shortcut", "script", "site",
+            "jamboard") or raw MIME type ("application/pdf"). Adds a
+            mimeType filter.
+        detailed: True (default) includes size, modified time, webViewLink
+            per file; False returns just name/ID/type.
+        order_by: Comma-separated sort keys: createdTime, folder,
+            modifiedByMeTime, modifiedTime, name, name_natural,
+            quotaBytesUsed, recency, sharedWithMeTime, starred,
+            viewedByMeTime. Append " desc" to reverse. Example:
+            "folder,modifiedTime desc,name".
 
     Returns:
-        str: A formatted list of found files/folders with their details (ID, name, type, and optionally size, modified time, link).
-             Includes a nextPageToken line when more results are available.
+        Formatted list with one line per hit, plus a `nextPageToken: ...`
+        line when more results exist.
     """
     logger.info(
         f"[search_drive_files] Invoked. Email: '{user_google_email}', Query: '{query}', file_type: '{file_type}'"
@@ -244,23 +252,27 @@ async def get_drive_file_content(
     user_google_email: str,
     file_id: str,
 ) -> str:
-    """
-    Retrieves the content of a specific Google Drive file by ID, supporting files in shared drives.
+    """Download a Drive file and return its text (auto-extracting per type).
 
-    • Native Google Docs, Sheets, Slides → exported as text / CSV.
-    • Office files (.docx, .xlsx, .pptx) → unzipped & parsed with std-lib to
-      extract readable text.
-    • PDFs → text extracted with pypdf when possible; scanned/image-only PDFs
-      fall back to a download hint.
-    • Images → returned as base64 with MIME metadata for multimodal clients.
-    • Any other file → downloaded; tries UTF-8 decode, else notes binary.
+    Use this when you need file text; for a URL to the raw bytes use
+    get_drive_file_download_url, for metadata use get_file_metadata (in
+    hosted clients) or list fields. Handles shared drives. Extraction:
+    Google Docs/Sheets/Slides export to text/CSV; Office .docx/.xlsx/.pptx
+    unzipped and parsed; PDFs extracted with pypdf (scanned PDFs fall back
+    to a download hint); images returned as base64 for multimodal
+    clients; other files decoded as UTF-8 or flagged binary. Requires the
+    drive.readonly OAuth scope.
 
     Args:
-        user_google_email: The user’s Google email address.
-        file_id: Drive file ID.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file ID from search_drive_files, list_drive_items,
+            or the URL like drive.google.com/file/d/<id>/view.
 
     Returns:
-        str: The file content as plain text with metadata header.
+        Block with filename, ID, MIME type, webViewLink, then a
+        "--- CONTENT ---" section containing the extracted text or a
+        bracketed note for binary/unsupported content.
     """
     logger.info(f"[get_drive_file_content] Invoked. File ID: '{file_id}'")
 
@@ -357,29 +369,30 @@ async def get_drive_file_download_url(
     file_id: str,
     export_format: Optional[str] = None,
 ) -> str:
-    """
-    Downloads a Google Drive file and saves it to local disk.
+    """Save a Drive file to disk (or expose a temporary URL).
 
-    In stdio mode, returns the local file path for direct access.
-    In HTTP mode, returns a temporary download URL (valid for 1 hour).
-
-    For Google native files (Docs, Sheets, Slides), exports to a useful format:
-    - Google Docs -> PDF (default) or DOCX if export_format='docx'
-    - Google Sheets -> XLSX (default), PDF if export_format='pdf', or CSV if export_format='csv'
-    - Google Slides -> PDF (default) or PPTX if export_format='pptx'
-
-    For other files, downloads the original file format.
+    Side effects: writes a file to the configured attachment storage
+    (stdio mode) or publishes a download URL valid for 1 hour (HTTP
+    mode). For file text content use get_drive_file_content instead;
+    use this when you specifically need the binary file or an export.
+    Google-native files are exported — Docs → PDF or DOCX; Sheets → XLSX,
+    PDF, or CSV; Slides → PDF or PPTX. Other files download as-is.
+    Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email: The user's Google email address. Required.
-        file_id: The Google Drive file ID to download.
-        export_format: Optional export format for Google native files.
-                      Options: 'pdf', 'docx', 'xlsx', 'csv', 'pptx'.
-                      If not specified, uses sensible defaults (PDF for Docs/Slides, XLSX for Sheets).
-                      For Sheets: supports 'csv', 'pdf', or 'xlsx' (default).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file ID from search_drive_files or a URL like
+            drive.google.com/file/d/<id>/view.
+        export_format: Export target for Google-native files. Docs:
+            "pdf" (default) or "docx". Sheets: "xlsx" (default), "pdf",
+            or "csv". Slides: "pdf" (default) or "pptx". Ignored for
+            non-native files.
 
     Returns:
-        str: File metadata with either a local file path or download URL.
+        Block with filename, file ID, size in KB, MIME type, and either
+        a local file path (stdio) or a 1-hour download URL (HTTP), plus
+        a note when a native file was exported.
     """
     logger.info(
         f"[get_drive_file_download_url] Invoked. File ID: '{file_id}', Export format: {export_format}"
@@ -551,34 +564,40 @@ async def list_drive_items(
     detailed: bool = True,
     order_by: Optional[str] = None,
 ) -> str:
-    """
-    Lists files and folders, supporting shared drives.
-    If `drive_id` is specified, lists items within that shared drive. `folder_id` is then relative to that drive (or use drive_id as folder_id for root).
-    If `drive_id` is not specified, lists items from user's "My Drive" and accessible shared drives (if `include_items_from_all_drives` is True).
+    """List files in one Drive folder (children of folder_id).
+
+    Use this to browse by folder; for content-based search use
+    search_drive_files. Scoped to a folder's direct children. If
+    drive_id is set, folder_id is interpreted inside that shared drive.
+    Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        folder_id (str): The ID of the Google Drive folder. Defaults to 'root'. For a shared drive, this can be the shared drive's ID to list its root, or a folder ID within that shared drive.
-        page_size (int): The maximum number of items to return. Defaults to 100.
-        page_token (Optional[str]): Page token from a previous response's nextPageToken to retrieve the next page of results.
-        drive_id (Optional[str]): ID of the shared drive. If provided, the listing is scoped to this drive.
-        include_items_from_all_drives (bool): Whether items from all accessible shared drives should be included if `drive_id` is not set. Defaults to True.
-        corpora (Optional[str]): Corpus to query ('user', 'drive', 'allDrives'). If `drive_id` is set and `corpora` is None, 'drive' is used. If None and no `drive_id`, API defaults apply.
-        file_type (Optional[str]): Restrict results to a specific file type. Accepts a friendly
-                                   name ('folder', 'document'/'doc', 'spreadsheet'/'sheet',
-                                   'presentation'/'slides', 'form', 'drawing', 'pdf', 'shortcut',
-                                   'script', 'site', 'jam'/'jamboard') or any raw MIME type
-                                   string (e.g. 'application/pdf'). Defaults to None (all types).
-        detailed (bool): Whether to include size, modified time, and link in results. Defaults to True.
-        order_by (Optional[str]): Sort order. Comma-separated list of sort keys with optional 'desc' modifier.
-                                  Valid keys: 'createdTime', 'folder', 'modifiedByMeTime', 'modifiedTime',
-                                  'name', 'name_natural', 'quotaBytesUsed', 'recency', 'sharedWithMeTime',
-                                  'starred', 'viewedByMeTime'. Example: 'modifiedTime desc' or 'folder,modifiedTime desc,name'.
-                                  Defaults to None (Drive API default ordering).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        folder_id: Folder ID to list. "root" = My Drive root. For a
+            shared drive, pass the drive ID to list its root or a folder
+            ID within it. Default "root".
+        page_size: Max items returned, 1-1000. Default 100.
+        page_token: Cursor from a prior response's `nextPageToken`.
+        drive_id: Shared drive ID to scope the listing. Omit for My
+            Drive + shared-with-me.
+        include_items_from_all_drives: True (default) to include shared
+            drive items when drive_id is omitted.
+        corpora: "user", "drive", or "allDrives". Defaults to "drive"
+            when drive_id is set.
+        file_type: Friendly alias ("folder", "doc", "sheet", "slides",
+            "pdf", etc.) or raw MIME type. Filters to that type only.
+        detailed: True (default) includes size, modified time,
+            webViewLink; False returns just name/ID/type.
+        order_by: Comma-separated sort keys with optional " desc", e.g.
+            "folder,modifiedTime desc". Valid keys: createdTime, folder,
+            modifiedByMeTime, modifiedTime, name, name_natural,
+            quotaBytesUsed, recency, sharedWithMeTime, starred,
+            viewedByMeTime.
 
     Returns:
-        str: A formatted list of files/folders in the specified folder.
-             Includes a nextPageToken line when more results are available.
+        Formatted list with one line per item, plus a `nextPageToken: ...`
+        line when more results exist.
     """
     logger.info(
         f"[list_drive_items] Invoked. Email: '{user_google_email}', Folder ID: '{folder_id}', File Type: '{file_type}'"
@@ -667,17 +686,23 @@ async def create_drive_folder(
     folder_name: str,
     parent_folder_id: str = "root",
 ) -> str:
-    """
-    Creates a new folder in Google Drive, supporting creation within shared drives.
+    """Create a new folder in Drive (or inside a shared drive).
+
+    Side effects: creates a folder owned by the authenticated user (or by
+    the shared drive when parent_folder_id lives in one). To upload files
+    into the new folder use create_drive_file with folder_id set to the
+    returned ID. Requires the drive.file OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        folder_name (str): The name for the new folder.
-        parent_folder_id (str): The ID of the parent folder. Defaults to 'root'.
-            For shared drives, use a folder ID within that shared drive.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        folder_name: Display name for the new folder. Forward slashes are
+            treated as literal characters, not nesting.
+        parent_folder_id: Parent folder ID. "root" for My Drive root, or a
+            folder ID within a shared drive for shared-drive folders.
 
     Returns:
-        str: Confirmation message with folder name, ID, and link.
+        Confirmation with the new folder's name, ID, and webViewLink.
     """
     logger.info(
         f"[create_drive_folder] Invoked. Email: '{user_google_email}', Folder: '{folder_name}', Parent: '{parent_folder_id}'"
@@ -699,20 +724,33 @@ async def create_drive_file(
     mime_type: str = "text/plain",
     fileUrl: Optional[str] = None,  # Now explicitly Optional
 ) -> str:
-    """
-    Creates a new file in Google Drive, supporting creation within shared drives.
-    Accepts either direct content or a fileUrl to fetch the content from.
+    """Upload a file to Drive from content, a URL, or a local path.
+
+    Side effects: creates a new Drive file. To convert source files
+    (Markdown, DOCX, etc.) into native Google Docs use import_to_google_doc
+    instead. For a brand-new empty Google Doc/Sheet/Slide use
+    create_doc/create_spreadsheet/create_presentation. Requires the
+    drive.file OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_name (str): The name for the new file.
-        content (Optional[str]): If provided, the content to write to the file.
-        folder_id (str): The ID of the parent folder. Defaults to 'root'. For shared drives, this must be a folder ID within the shared drive.
-        mime_type (str): The MIME type of the file. Defaults to 'text/plain'.
-        fileUrl (Optional[str]): If provided, fetches the file content from this URL. Supports file://, http://, and https:// protocols.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_name: Name for the new Drive file (include the file extension
+            for clarity, though the MIME type is authoritative).
+        content: Text content for the new file. Mutually exclusive with
+            fileUrl. Provide one of content or fileUrl.
+        folder_id: Parent folder ID. "root" = My Drive root; for shared
+            drives pass a folder ID inside that drive. Default "root".
+        mime_type: MIME type of the uploaded bytes. Default
+            "text/plain". When fileUrl is used and the server responds
+            with a Content-Type, it overrides this.
+        fileUrl: Source URL — supports file:// (local path), http://, and
+            https://. When provided, the bytes are streamed into Drive.
+            SSRF-protected with size limits.
 
     Returns:
-        str: Confirmation message of the successful file creation with file link.
+        Confirmation with the new file's name, ID, parent folder, and
+        webViewLink.
     """
     logger.info(
         f"[create_drive_file] Invoked. Email: '{user_google_email}', File Name: {file_name}, Folder ID: {folder_id}, fileUrl: {fileUrl}"
@@ -964,21 +1002,29 @@ async def import_to_google_doc(
     source_format: Optional[str] = None,
     folder_id: str = "root",
 ) -> str:
-    """
-    Imports a file (Markdown, DOCX, TXT, HTML, RTF, ODT) into Google Docs format with automatic conversion.
+    """Convert a source file into a native Google Doc on upload.
 
-    Google Drive automatically converts the source file to native Google Docs format,
-    preserving formatting like headings, lists, bold, italic, etc.
+    Drive performs the conversion server-side, preserving headings, lists,
+    inline formatting, tables, etc. Use this (not create_drive_file) when
+    you want a real Google Doc editable in the web UI. For adding content
+    to an existing Doc use insert_doc_markdown or insert_doc_elements.
+    Requires the drive.file OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_name (str): The name for the new Google Doc (extension will be ignored).
-        content (Optional[str]): Text content for text-based formats (MD, TXT, HTML).
-        file_path (Optional[str]): Local file path for binary formats (DOCX, ODT). Supports file:// URLs.
-        file_url (Optional[str]): Remote URL to fetch the file from (http/https).
-        source_format (Optional[str]): Source format hint ('md', 'markdown', 'docx', 'txt', 'html', 'rtf', 'odt').
-                                       Auto-detected from file_name extension if not provided.
-        folder_id (str): The ID of the parent folder. Defaults to 'root'.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_name: Display name for the resulting Google Doc (extension
+            is stripped).
+        content: Inline text for text formats (md, txt, html). Mutually
+            exclusive with file_path and file_url.
+        file_path: Local path or file:// URL to a binary source
+            (docx/odt/rtf). Path safety validated.
+        file_url: http:// or https:// URL to stream the source from.
+            SSRF-protected with size limits.
+        source_format: Override for format detection: "md"/"markdown",
+            "docx", "txt", "html", "rtf", "odt". Auto-detected from
+            file_name extension or content heuristics when omitted.
+        folder_id: Parent folder ID. Default "root".
 
     Returns:
         str: Confirmation message with the new Google Doc link.
@@ -1192,15 +1238,26 @@ async def get_drive_file_permissions(
     user_google_email: str,
     file_id: str,
 ) -> str:
-    """
-    Gets detailed metadata about a Google Drive file including sharing permissions.
+    """Inspect a Drive file's sharing permissions and public-link status.
+
+    Use this to audit who can access a file before sharing externally. To
+    change sharing use set_drive_file_permissions or manage_drive_access.
+    For a quick public-vs-private check by filename use
+    check_drive_file_public_access. Requires the drive.readonly OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file to check permissions for.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file ID from search_drive_files or a shareable
+            URL.
 
     Returns:
-        str: Detailed file metadata including sharing status and URLs.
+        Block with file metadata (name, ID, type, size, modifiedTime),
+        sharing status, per-permission details (type, role, email,
+        domain, expiration), view/download URLs, and a verdict on
+        whether the file can be embedded in Google Docs (requires
+        "Anyone with the link").
     """
     logger.info(
         f"[get_drive_file_permissions] Checking file {file_id} for {user_google_email}"
@@ -1301,15 +1358,22 @@ async def check_drive_file_public_access(
     user_google_email: str,
     file_name: str,
 ) -> str:
-    """
-    Searches for a file by name and checks if it has public link sharing enabled.
+    """Search by filename and report whether the file is publicly linked.
+
+    Quick helper for Google Docs embedding — a file must have "Anyone with
+    the link" access before insert_doc_image can render it. If multiple
+    files match the name, checks the first. For a specific file use
+    get_drive_file_permissions. Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_name (str): The name of the file to check.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_name: Exact display name (case-sensitive) as shown in Drive.
 
     Returns:
-        str: Information about the file's sharing status and whether it can be used in Google Docs.
+        Block showing file name/ID/type, shared flag, and a verdict:
+        either an embeddable URL to pass to insert_doc_image, or steps
+        to enable public sharing.
     """
     logger.info(f"[check_drive_file_public_access] Searching for {file_name}")
 
@@ -1411,25 +1475,35 @@ async def update_drive_file(
     # Custom properties
     properties: Optional[dict] = None,  # User-visible custom properties
 ) -> str:
-    """
-    Updates metadata and properties of a Google Drive file.
+    """Update a Drive file's metadata, folder parents, and flags.
+
+    Side effects: mutates the file (rename, move via add/remove_parents,
+    trash/untrash, star). Does NOT upload new content — for content use
+    a native-app tool or create_drive_file. trashed=True is reversible
+    with trashed=False until the file is permanently deleted. Requires
+    the drive.file OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file to update. Required.
-        name (Optional[str]): New name for the file.
-        description (Optional[str]): New description for the file.
-        mime_type (Optional[str]): New MIME type (note: changing type may require content upload).
-        add_parents (Optional[str]): Comma-separated folder IDs to add as parents.
-        remove_parents (Optional[str]): Comma-separated folder IDs to remove from parents.
-        starred (Optional[bool]): Whether to star/unstar the file.
-        trashed (Optional[bool]): Whether to move file to/from trash.
-        writers_can_share (Optional[bool]): Whether editors can share the file.
-        copy_requires_writer_permission (Optional[bool]): Whether copying requires writer permission.
-        properties (Optional[dict]): Custom key-value properties for the file.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file ID to update.
+        name: New display name.
+        description: New description text.
+        mime_type: New MIME type (changing this rarely works without
+            also uploading matching content).
+        add_parents: Comma-separated folder IDs to add the file into
+            (effectively moves when combined with remove_parents).
+        remove_parents: Comma-separated folder IDs to detach from.
+        starred: True to star, False to unstar.
+        trashed: True moves to Trash (soft-delete), False restores.
+        writers_can_share: Whether editors may re-share the file.
+        copy_requires_writer_permission: When True, copies require
+            writer access (reader copy/export blocked).
+        properties: Dict of user-visible custom key-value pairs attached
+            to the file.
 
     Returns:
-        str: Confirmation message with details of the updates applied.
+        Confirmation listing which fields were updated.
     """
     logger.info(f"[update_drive_file] Updating file {file_id} for {user_google_email}")
 
@@ -1573,15 +1647,21 @@ async def get_drive_shareable_link(
     user_google_email: str,
     file_id: str,
 ) -> str:
-    """
-    Gets the shareable link for a Google Drive file or folder.
+    """Fetch the webViewLink and current permissions for a Drive item.
+
+    Read-only — does NOT change sharing. To modify sharing use
+    manage_drive_access. For a fuller permissions audit use
+    get_drive_file_permissions. Requires the drive.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file or folder to get the shareable link for. Required.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file or folder ID.
 
     Returns:
-        str: The shareable links and current sharing status.
+        Block with file name/ID/type, shared flag, View URL, optional
+        Download URL, and each permission entry (type, role, email or
+        domain, expiration).
     """
     logger.info(
         f"[get_drive_shareable_link] Invoked. Email: '{user_google_email}', File ID: '{file_id}'"
@@ -1645,48 +1725,46 @@ async def manage_drive_access(
     new_owner_email: Optional[str] = None,
     move_to_new_owners_root: bool = False,
 ) -> str:
-    """
-    Consolidated tool for managing Google Drive file and folder access permissions.
+    """Grant, batch-grant, update, revoke, or transfer ownership on a Drive item.
 
-    Supports granting, batch-granting, updating, revoking permissions, and
-    transferring file ownership -- all through a single entry point.
+    Side effects: all actions mutate permissions; transfer_owner
+    permanently changes the file's owner. Notification emails are sent
+    per send_notification. For read-only inspection use
+    get_drive_file_permissions. Requires the drive.file OAuth scope (or
+    higher for cross-domain transfers).
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file or folder. Required.
-        action (str): The access management action to perform. Required. One of:
-            - "grant": Share with a single user, group, domain, or anyone.
-            - "grant_batch": Share with multiple recipients in one call.
-            - "update": Modify an existing permission (role or expiration).
-            - "revoke": Remove an existing permission.
-            - "transfer_owner": Transfer file ownership to another user.
-        share_with (Optional[str]): Email address (user/group), domain name (domain),
-            or omit for 'anyone'. Used by "grant".
-        role (Optional[str]): Permission role -- 'reader', 'commenter', or 'writer'.
-            Used by "grant" (defaults to 'reader') and "update".
-        share_type (str): Type of sharing -- 'user', 'group', 'domain', or 'anyone'.
-            Used by "grant". Defaults to 'user'.
-        permission_id (Optional[str]): The permission ID to modify or remove.
-            Required for "update" and "revoke" actions.
-        recipients (Optional[List[Dict[str, Any]]]): List of recipient objects for
-            "grant_batch". Each should have: email (str), role (str, optional),
-            share_type (str, optional), expiration_time (str, optional). For domain
-            shares use 'domain' field instead of 'email'.
-        send_notification (bool): Whether to send notification emails. Defaults to True.
-            Used by "grant" and "grant_batch".
-        email_message (Optional[str]): Custom notification email message.
-            Used by "grant" and "grant_batch".
-        expiration_time (Optional[str]): Expiration in RFC 3339 format
-            (e.g., "2025-01-15T00:00:00Z"). Used by "grant" and "update".
-        allow_file_discovery (Optional[bool]): For 'domain'/'anyone' shares, whether
-            the file appears in search. Used by "grant".
-        new_owner_email (Optional[str]): Email of the new owner.
-            Required for "transfer_owner".
-        move_to_new_owners_root (bool): Move file to the new owner's My Drive root.
-            Defaults to False. Used by "transfer_owner".
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file or folder ID.
+        action: "grant", "grant_batch", "update", "revoke", or
+            "transfer_owner".
+        share_with: For "grant" — recipient email (user/group) or domain
+            name (domain). Omit for share_type="anyone".
+        role: For "grant" (default "reader") and "update": "reader",
+            "commenter", or "writer".
+        share_type: For "grant": "user", "group", "domain", or "anyone".
+            Default "user".
+        permission_id: Required for "update" and "revoke". Get it from
+            get_drive_file_permissions.
+        recipients: For "grant_batch": list of objects with keys email
+            (or domain for domain shares), role, share_type,
+            expiration_time.
+        send_notification: Send the recipient an email. Default True.
+            Applies to grant/grant_batch user/group shares.
+        email_message: Custom body appended to the notification email.
+        expiration_time: RFC3339 deadline ("2026-06-01T00:00:00Z") after
+            which the permission auto-revokes. Applies to grant/update.
+        allow_file_discovery: For domain/anyone shares, True = indexable
+            in search, False = link-only.
+        new_owner_email: Required for "transfer_owner". Must be inside
+            the same Workspace domain in most cases.
+        move_to_new_owners_root: After transfer, move the file to the
+            new owner's My Drive root. Default False.
 
     Returns:
-        str: Confirmation with details of the permission change applied.
+        Confirmation with the applied permission details, or (for
+        grant_batch) a per-recipient success/failure summary.
     """
     valid_actions = ("grant", "grant_batch", "update", "revoke", "transfer_owner")
     if action not in valid_actions:
@@ -2002,20 +2080,25 @@ async def copy_drive_file(
     new_name: Optional[str] = None,
     parent_folder_id: str = "root",
 ) -> str:
-    """
-    Creates a copy of an existing Google Drive file.
+    """Duplicate a Drive file (including Google Docs/Sheets/Slides).
 
-    This tool copies the template document to a new location with an optional new name.
-    The copy maintains all formatting and content from the original file.
+    Side effects: creates a new owned-by-caller file; formatting and
+    content are preserved. For folders use copy_drive_folder (deep copy).
+    For Google Docs specifically this is the standard "duplicate from
+    template" pattern — copy, then edit via batch_update_doc.  Requires
+    the drive.file OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file to copy. Required.
-        new_name (Optional[str]): New name for the copied file. If not provided, uses "Copy of [original name]".
-        parent_folder_id (str): The ID of the folder where the copy should be created. Defaults to 'root' (My Drive).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file ID of the source.
+        new_name: Name for the copy. Defaults to "Copy of <original>".
+        parent_folder_id: Target folder ID. Default "root" (My Drive).
+            Shared-drive folder IDs work.
 
     Returns:
-        str: Confirmation message with details of the copied file and its link.
+        Confirmation with original ID, new file ID, new name, MIME type,
+        parent folder, and webViewLink of the copy.
     """
     logger.info(
         f"[copy_drive_file] Invoked. Email: '{user_google_email}', File ID: '{file_id}', New name: '{new_name}', Parent folder: '{parent_folder_id}'"
@@ -2077,28 +2160,29 @@ async def set_drive_file_permissions(
     writers_can_share: Optional[bool] = None,
     copy_requires_writer_permission: Optional[bool] = None,
 ) -> str:
-    """
-    Sets file-level sharing settings and controls link sharing for a Google Drive file or folder.
+    """Toggle link-sharing and common file-level sharing controls.
 
-    This is a high-level tool for the most common permission changes. Use this to toggle
-    "anyone with the link" access or configure file-level sharing behavior. For managing
-    individual user/group permissions, use share_drive_file or update_drive_permission instead.
+    Side effects: mutates sharing policy. Use this for high-level toggles
+    ("anyone with the link", editor share rights, viewer copy-prevention).
+    For per-user/group permission changes use manage_drive_access. At
+    least one of the three flags must be set. Requires the drive.file
+    OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        file_id (str): The ID of the file or folder. Required.
-        link_sharing (Optional[str]): Control "anyone with the link" access for the file.
-            - "off": Disable "anyone with the link" access for this file.
-            - "reader": Anyone with the link can view.
-            - "commenter": Anyone with the link can comment.
-            - "writer": Anyone with the link can edit.
-        writers_can_share (Optional[bool]): Whether editors can change permissions and share.
-            If False, only the owner can share. Defaults to None (no change).
-        copy_requires_writer_permission (Optional[bool]): Whether viewers and commenters
-            are prevented from copying, printing, or downloading. Defaults to None (no change).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        file_id: Drive file or folder ID.
+        link_sharing: "off" removes anyone-with-link access; "reader",
+            "commenter", or "writer" sets the link role. Omit to leave
+            link sharing unchanged.
+        writers_can_share: True lets editors re-share; False restricts
+            sharing to owner only.
+        copy_requires_writer_permission: True blocks viewers/commenters
+            from copy/print/download; False allows.
 
     Returns:
-        str: Summary of all permission changes applied to the file.
+        Summary of each permission change applied, grouped by file-level
+        vs link-sharing settings.
     """
     logger.info(
         f"[set_drive_file_permissions] Invoked. Email: '{user_google_email}', "

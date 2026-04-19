@@ -120,16 +120,23 @@ async def list_task_lists(
     max_results: int = 1000,
     page_token: Optional[str] = None,
 ) -> str:
-    """
-    List all task lists for the user.
+    """List the user's Google Tasks task lists.
+
+    Use this to discover task_list_id before calling list_tasks,
+    get_task, or manage_task. Every user has a default list
+    ("My Tasks"). For modifying task lists themselves use
+    manage_task_list. Requires the tasks.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        max_results (int): Maximum number of task lists to return (default: 1000, max: 1000).
-        page_token (Optional[str]): Token for pagination.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        max_results: Max lists per page. Default/cap 1000.
+        page_token: Cursor from a prior response's "Next page token"
+            line.
 
     Returns:
-        str: List of task lists with their IDs, titles, and details.
+        Formatted list with each task list's title, ID, and last updated
+        time. Trailing "Next page token:" line when more pages exist.
     """
     logger.info(f"[list_task_lists] Invoked. Email: '{user_google_email}'")
 
@@ -175,15 +182,19 @@ async def list_task_lists(
 async def get_task_list(
     service: Resource, user_google_email: str, task_list_id: str
 ) -> str:
-    """
-    Get details of a specific task list.
+    """Fetch metadata for a single Google Tasks task list.
+
+    Returns list-level info only (title, last updated); for the list's
+    tasks use list_tasks. Requires the tasks.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        task_list_id (str): The ID of the task list to retrieve.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        task_list_id: Task list ID from list_task_lists.
 
     Returns:
-        str: Task list details including title, ID, and last updated time.
+        Block with the task list's title, ID, last-updated timestamp,
+        and self link.
     """
     logger.info(
         f"[get_task_list] Invoked. Email: '{user_google_email}', Task List ID: {task_list_id}"
@@ -314,17 +325,24 @@ async def manage_task_list(
     task_list_id: Optional[str] = None,
     title: Optional[str] = None,
 ) -> str:
-    """
-    Manage task lists: create, update, delete, or clear completed tasks.
+    """Create, rename, delete a task list, or clear its completed tasks.
+
+    Side effects: delete is destructive — removes the list AND all its
+    tasks. clear_completed hides completed tasks from default views
+    (they remain retrievable via list_tasks with show_hidden=True). For
+    tasks inside a list use manage_task. Requires the tasks OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): The action to perform. Must be one of: "create", "update", "delete", "clear_completed".
-        task_list_id (Optional[str]): The ID of the task list. Required for "update", "delete", and "clear_completed" actions.
-        title (Optional[str]): The title for the task list. Required for "create" and "update" actions.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "update", "delete", or "clear_completed".
+        task_list_id: Task list ID. Required for update, delete,
+            clear_completed. Get from list_task_lists.
+        title: New display title. Required for create and update.
 
     Returns:
-        str: Result of the requested action.
+        Confirmation block describing the operation performed, including
+        returned task list details for create/update.
     """
     logger.info(
         f"[manage_task_list] Invoked. Email: '{user_google_email}', Action: '{action}'"
@@ -390,26 +408,39 @@ async def list_tasks(
     due_min: Optional[str] = None,
     updated_min: Optional[str] = None,
 ) -> str:
-    """
-    List all tasks in a specific task list.
+    """List tasks in one task list, with rich filters and auto-pagination.
+
+    Auto-paginates internally to fill up to max_results. For one specific
+    task use get_task. For write operations use manage_task. Completed
+    tasks from the web UI / mobile apps are "hidden" by default — to see
+    them set both show_completed=True AND show_hidden=True. Requires the
+    tasks.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        task_list_id (str): The ID of the task list to retrieve tasks from.
-        max_results (int): Maximum number of tasks to return. (default: 20, max: 10000).
-        page_token (Optional[str]): Token for pagination.
-        show_completed (bool): Whether to include completed tasks (default: True). Note that show_hidden must also be true to show tasks completed in first party clients, such as the web UI and Google's mobile apps.
-        show_deleted (bool): Whether to include deleted tasks (default: False).
-        show_hidden (bool): Whether to include hidden tasks (default: False).
-        show_assigned (bool): Whether to include assigned tasks (default: False).
-        completed_max (Optional[str]): Upper bound for completion date (RFC 3339 timestamp).
-        completed_min (Optional[str]): Lower bound for completion date (RFC 3339 timestamp).
-        due_max (Optional[str]): Upper bound for due date (RFC 3339 timestamp).
-        due_min (Optional[str]): Lower bound for due date (RFC 3339 timestamp).
-        updated_min (Optional[str]): Lower bound for last modification time (RFC 3339 timestamp).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        task_list_id: Task list ID from list_task_lists.
+        max_results: Cap on tasks returned across all pages. Default
+            varies; hard cap 10000.
+        page_token: Resume cursor from a prior call's "Next page token".
+        show_completed: Include completed tasks. Default True.
+        show_deleted: Include deleted tasks. Default False.
+        show_hidden: Include tasks hidden from the UI (required alongside
+            show_completed to see web/mobile-completed tasks). Default
+            False.
+        show_assigned: Include tasks assigned to the user. Default False.
+        completed_max: RFC3339 upper bound on completion date.
+        completed_min: RFC3339 lower bound on completion date.
+        due_max: RFC3339 upper bound on due date. Auto-adjusted to
+            include the boundary date's tasks.
+        due_min: RFC3339 lower bound on due date.
+        updated_min: RFC3339 lower bound on last-modified time — useful
+            for incremental sync.
 
     Returns:
-        str: List of tasks with their details.
+        Formatted, ordered task list showing title, status, due date,
+        notes preview, ID, parent (for subtasks), and completed time
+        when applicable. Trailing pagination token line when truncated.
     """
     logger.info(
         f"[list_tasks] Invoked. Email: '{user_google_email}', Task List ID: {task_list_id}"
@@ -621,16 +652,23 @@ This can also occur due to filtering that excludes parent tasks while including 
 async def get_task(
     service: Resource, user_google_email: str, task_list_id: str, task_id: str
 ) -> str:
-    """
-    Get details of a specific task.
+    """Fetch a single Google Tasks task by ID.
+
+    Returns full details including parent task ID (for subtasks),
+    position, notes, due date, and web view link. For the full list of
+    tasks in a list use list_tasks. For mutations use manage_task.
+    Requires the tasks.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        task_list_id (str): The ID of the task list containing the task.
-        task_id (str): The ID of the task to retrieve.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        task_list_id: Parent task list ID from list_task_lists.
+        task_id: Task ID from list_tasks.
 
     Returns:
-        str: Task details including title, notes, status, due date, etc.
+        Block with Title, ID, Status (needsAction/completed), Updated
+        time, and when present: Due, Completed, Notes, Parent task ID,
+        Position, Self Link, Web View Link.
     """
     logger.info(
         f"[get_task] Invoked. Email: '{user_google_email}', Task List ID: {task_list_id}, Task ID: {task_id}"
@@ -875,24 +913,37 @@ async def manage_task(
     previous: Optional[str] = None,
     destination_task_list: Optional[str] = None,
 ) -> str:
-    """
-    Manage tasks: create, update, delete, or move tasks within task lists.
+    """Create, update, delete, or move a task inside a task list.
+
+    Side effects: mutates Google Tasks state. "move" can reparent a task
+    (make it a subtask) and/or relocate it to a different list. Complete
+    a task by calling action="update" with status="completed". For
+    list-level operations use manage_task_list. Requires the tasks OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): The action to perform. Must be one of: "create", "update", "delete", "move".
-        task_list_id (str): The ID of the task list. Required for all actions.
-        task_id (Optional[str]): The ID of the task. Required for "update", "delete", and "move" actions.
-        title (Optional[str]): The title of the task. Required for "create", optional for "update".
-        notes (Optional[str]): Notes/description for the task. Used by "create" and "update" actions.
-        status (Optional[str]): Task status ("needsAction" or "completed"). Used by "update" action.
-        due (Optional[str]): Due date in RFC 3339 format (e.g., "2024-12-31T23:59:59Z"). Used by "create" and "update" actions.
-        parent (Optional[str]): Parent task ID (for subtasks). Used by "create" and "move" actions.
-        previous (Optional[str]): Previous sibling task ID (for positioning). Used by "create" and "move" actions.
-        destination_task_list (Optional[str]): Destination task list ID (for moving between lists). Used by "move" action.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "update", "delete", or "move".
+        task_list_id: Parent task list ID from list_task_lists.
+            Required for all actions.
+        task_id: Task ID from list_tasks. Required for update, delete,
+            move.
+        title: Task title. Required for create; optional for update.
+        notes: Body/description text.
+        status: Only for update — "needsAction" or "completed".
+        due: RFC3339 due timestamp, e.g. "2026-12-31T23:59:59Z".
+            Google Tasks ignores the time portion and uses the date only.
+        parent: Parent task ID to make this a subtask (create/move).
+        previous: ID of the preceding sibling task for ordering
+            (create/move). Omit to place first.
+        destination_task_list: For move — moves the task into another
+            list.
 
     Returns:
-        str: Result of the requested action.
+        Confirmation block with the resulting task's details (title, ID,
+        status, due, notes, parent/position when set), or a deletion
+        confirmation.
     """
     logger.info(
         f"[manage_task] Invoked. Email: '{user_google_email}', Action: '{action}', Task List ID: {task_list_id}"

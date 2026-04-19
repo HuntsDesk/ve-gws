@@ -126,17 +126,24 @@ async def create_form(
     description: Optional[str] = None,
     document_title: Optional[str] = None,
 ) -> str:
-    """
-    Create a new form using the title given in the provided form message in the request.
+    """Create a new Google Form with title and optional description.
+
+    Side effects: creates a new empty form owned by the user. To add
+    questions/items afterward use batch_update_form with createItem
+    requests; inspect the form with get_form. Requires the forms OAuth
+    scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        title (str): The title of the form.
-        description (Optional[str]): The description of the form.
-        document_title (Optional[str]): The document title (shown in browser tab).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        title: Form title shown at the top of the form to respondents.
+        description: Optional subtitle text shown under the title.
+        document_title: Optional browser-tab/Drive title. Defaults to
+            the form's `title` if omitted.
 
     Returns:
-        str: Confirmation message with form ID and edit URL.
+        Confirmation with the new form's title, form ID, edit URL, and
+        public responder URL.
     """
     logger.info(f"[create_form] Invoked. Email: '{user_google_email}', Title: {title}")
 
@@ -257,17 +264,25 @@ async def set_publish_settings(
     publish_as_template: bool = False,
     require_authentication: bool = False,
 ) -> str:
-    """
-    Updates the publish settings of a form.
+    """Update a Google Form's publishing and auth requirements.
+
+    Side effects: mutates publish settings — changes how the form is
+    discoverable (template) and who can submit (auth required). Does
+    NOT change which items are on the form; for that use
+    batch_update_form. Requires the forms OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        form_id (str): The ID of the form to update publish settings for.
-        publish_as_template (bool): Whether to publish as a template. Defaults to False.
-        require_authentication (bool): Whether to require authentication to view/submit. Defaults to False.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        form_id: Form ID from the edit URL after /forms/d/.
+        publish_as_template: True lists the form as a template in the
+            Workspace template gallery. Default False.
+        require_authentication: True requires respondents to sign in
+            with a Google account to view/submit (their email is
+            captured). False allows anonymous access. Default False.
 
     Returns:
-        str: Confirmation message of the successful publish settings update.
+        Confirmation line listing the new flag values.
     """
     logger.info(
         f"[set_publish_settings] Invoked. Email: '{user_google_email}', Form ID: {form_id}"
@@ -516,27 +531,32 @@ async def batch_update_form(
     form_id: str,
     requests: List[Dict[str, Any]],
 ) -> str:
-    """
-    Apply batch updates to a Google Form.
+    """Apply a batch of Forms API edit requests in one atomic call.
 
-    Supports adding, updating, and deleting form items, as well as updating
-    form metadata and settings. This is the primary method for modifying form
-    content after creation.
+    Primary way to modify a form after creation — add/update/delete
+    questions, reorder items, update info, toggle quiz mode, etc. All
+    requests apply atomically: partial failure rolls the whole batch
+    back. Use get_form first to discover existing itemIds/questionIds.
+    For publish settings use set_publish_settings. Requires the forms
+    OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        form_id (str): The ID of the form to update.
-        requests (List[Dict[str, Any]]): List of update requests to apply.
-            Supported request types:
-            - createItem: Add a new question or content item
-            - updateItem: Modify an existing item
-            - deleteItem: Remove an item
-            - moveItem: Reorder an item
-            - updateFormInfo: Update form title/description
-            - updateSettings: Modify form settings (e.g., quiz mode)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        form_id: Form ID from the edit URL.
+        requests: List of Forms API request objects — each has exactly
+            one key: `createItem` (with item body + location.index),
+            `updateItem` (item + updateMask), `deleteItem` (location
+            index), `moveItem` (originalLocation + newLocation),
+            `updateFormInfo` (info + updateMask), or `updateSettings`
+            (settings + updateMask). See
+            https://developers.google.com/forms/api/reference/rest/v1/forms/batchUpdate
+            for full schemas.
 
     Returns:
-        str: Details about the batch update operation results.
+        Summary with request count, reply count, edit URL, and inline
+        notes for createItem replies showing new itemIds/questionIds —
+        capture these for follow-up edits.
     """
     logger.info(
         f"[batch_update_form] Invoked. Email: '{user_google_email}', "

@@ -34,15 +34,23 @@ logger = logging.getLogger(__name__)
 async def create_presentation(
     service, user_google_email: str, title: str = "Untitled Presentation"
 ) -> str:
-    """
-    Create a new Google Slides presentation.
+    """Create a new empty Google Slides presentation.
+
+    Side effects: creates a new Slides file owned by the user in My Drive
+    root. The new deck contains one default blank slide. To add more
+    slides use batch_update_presentation with createSlide; to duplicate
+    an existing deck use copy_drive_file. Requires the
+    presentations OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        title (str): The title for the new presentation. Defaults to "Untitled Presentation".
+        user_google_email: The user's Google email address (authenticated
+            account).
+        title: Display title for the new deck. Default "Untitled
+            Presentation".
 
     Returns:
-        str: Details about the created presentation including ID and URL.
+        Block with the new presentation's title, ID, edit URL, and
+        initial slide count.
     """
     logger.info(
         f"[create_presentation] Invoked. Email: '{user_google_email}', Title: '{title}'"
@@ -71,15 +79,24 @@ async def create_presentation(
 async def get_presentation(
     service, user_google_email: str, presentation_id: str
 ) -> str:
-    """
-    Get details about a Google Slides presentation.
+    """Retrieve a presentation's structure and extract text per slide.
+
+    Returns slide objectIds needed by other tools (get_page,
+    format_slides_text, format_slides_paragraph, insert_slides_image,
+    etc.). For a single-slide deep dive use get_page. For a rendered
+    thumbnail image use get_page_thumbnail. Requires the
+    presentations.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        presentation_id (str): The ID of the presentation to retrieve.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Presentation ID from a URL like
+            docs.google.com/presentation/d/<id>/edit.
 
     Returns:
-        str: Details about the presentation including title, slides count, and metadata.
+        Block with title, presentation ID, edit URL, slide count, page
+        size (EMU), and a per-slide breakdown showing slide objectId,
+        element count, and extracted text preview.
     """
     logger.info(
         f"[get_presentation] Invoked. Email: '{user_google_email}', ID: '{presentation_id}'"
@@ -167,16 +184,28 @@ async def batch_update_presentation(
     presentation_id: str,
     requests: List[Dict[str, Any]],
 ) -> str:
-    """
-    Apply batch updates to a Google Slides presentation.
+    """Apply a batch of Slides API edit requests in one atomic call.
+
+    This is the low-level escape hatch for anything not covered by the
+    high-level helpers (create_slides_shape, create_slides_text_box,
+    format_slides_text, duplicate_slide, reorder_slides, etc.). All
+    requests in a single call apply atomically — partial failure rolls
+    back the whole batch. Requires the presentations OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        presentation_id (str): The ID of the presentation to update.
-        requests (List[Dict[str, Any]]): List of update requests to apply.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Target presentation ID.
+        requests: List of Slides API request objects — each has one key
+            like "createSlide", "updateTextStyle", "deleteObject",
+            "createShape", "insertText", "replaceAllText", etc. See
+            https://developers.google.com/slides/api/reference/rest/v1/presentations/request
+            for the full schema.
 
     Returns:
-        str: Details about the batch update operation results.
+        Summary with request count, reply count, and for each reply an
+        inline note about created slide/shape object IDs when
+        applicable.
     """
     logger.info(
         f"[batch_update_presentation] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Requests: {len(requests)}"
@@ -224,16 +253,25 @@ async def batch_update_presentation(
 async def get_page(
     service, user_google_email: str, presentation_id: str, page_object_id: str
 ) -> str:
-    """
-    Get details about a specific page (slide) in a presentation.
+    """Fetch one slide's element list, types, and layout.
+
+    Use this when you need a single slide's details after
+    get_presentation has given you the list of slide objectIds. For a
+    thumbnail image use get_page_thumbnail. For the speaker notes text
+    use get_slides_speaker_notes. Requires the presentations.readonly
+    OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        presentation_id (str): The ID of the presentation.
-        page_object_id (str): The object ID of the page/slide to retrieve.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Parent presentation ID.
+        page_object_id: Slide objectId from get_presentation's
+            `slides[].objectId` field.
 
     Returns:
-        str: Details about the specific page including elements and layout.
+        Block with slide objectId, page type, total element count, and
+        per-element summary (shape type, table size, line type, etc.)
+        with each element's objectId.
     """
     logger.info(
         f"[get_page] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}', Page: '{page_object_id}'"
@@ -289,17 +327,24 @@ async def get_page_thumbnail(
     page_object_id: str,
     thumbnail_size: str = "MEDIUM",
 ) -> str:
-    """
-    Generate a thumbnail URL for a specific page (slide) in a presentation.
+    """Generate a PNG thumbnail URL for one slide.
+
+    Useful for visual previews. Returns a Google-hosted URL (not the image
+    bytes). The URL is short-lived — fetch and cache quickly. For slide
+    element details use get_page. Requires the presentations.readonly
+    OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        presentation_id (str): The ID of the presentation.
-        page_object_id (str): The object ID of the page/slide.
-        thumbnail_size (str): Size of thumbnail ("LARGE", "MEDIUM", "SMALL"). Defaults to "MEDIUM".
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Parent presentation ID.
+        page_object_id: Slide objectId from get_presentation.
+        thumbnail_size: "LARGE" (~1600px wide), "MEDIUM" (~800px, default),
+            or "SMALL" (~200px).
 
     Returns:
-        str: URL to the generated thumbnail image.
+        Block with presentation/page IDs, requested size, and the
+        contentUrl of the PNG thumbnail.
     """
     logger.info(
         f"[get_page_thumbnail] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}', Page: '{page_object_id}', Size: '{thumbnail_size}'"
@@ -349,21 +394,37 @@ async def format_slides_text(
     start_index: Optional[int] = None,
     end_index: Optional[int] = None,
 ) -> str:
-    """
-    Apply text formatting to text inside a slide element (text box, shape, placeholder).
+    """Apply character-level formatting to text inside a slide element.
+
+    Use this for inline styling (bold, italic, font, color); use
+    format_slides_paragraph for alignment/spacing/bullets, and
+    style_slides_shape for the shape outline/fill/shadow. For bulk
+    re-style across every text element use format_all_slides_text.
+    Requires the presentations OAuth scope.
 
     Args:
-        user_google_email: The user's Google email address. Required.
-        presentation_id: ID of the presentation.
-        page_element_id: Object ID of the element containing the text.
-        bold, italic, underline, strikethrough: Optional boolean formatting flags.
-        font_family: Optional font family name (e.g., "Arial").
-        font_size: Optional font size in points.
-        text_color: Optional hex color (e.g., "#FF0000").
-        start_index, end_index: Optional character range. If both omitted, formats ALL text.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Parent presentation ID (from the URL after /d/).
+        page_element_id: objectId of the text-bearing element (text box,
+            shape, or placeholder) — get from get_presentation or
+            get_page.
+        bold: True to bold, False to unbold, None to leave unchanged.
+        italic: Same semantics as bold for italic.
+        underline: Same semantics as bold for underline.
+        strikethrough: Same semantics as bold for strikethrough.
+        font_family: Font family name, e.g. "Arial", "Roboto",
+            "Helvetica Neue".
+        font_size: Font size in points, e.g. 14 or 24.5.
+        text_color: Hex color like "#FF0000" or "#333333".
+        start_index: 0-based character offset where formatting begins.
+            Omit both indices to format ALL text in the element.
+        end_index: 0-based character offset (exclusive) where
+            formatting ends.
 
     Returns:
-        Confirmation string with the object ID formatted.
+        Confirmation naming the element and listing which style fields
+        were applied.
     """
     logger.info(
         f"[format_slides_text] pres='{presentation_id}' element='{page_element_id}'"
@@ -429,23 +490,31 @@ async def format_all_slides_text(
     font_size: Optional[float] = None,
     text_color: Optional[str] = None,
 ) -> str:
-    """
-    Apply text formatting to EVERY text element on a slide or across the whole
-    presentation.
+    """Bulk-apply character formatting to every text element on a slide or deck.
 
-    Walks the presentation, collects every page element that contains text,
-    and issues one updateTextStyle request per element in a single batchUpdate.
-    Use this to bulk-restyle fonts, colors, or emphasis without specifying
-    every element ID individually.
+    Walks the presentation, collects every page element containing text,
+    and issues one updateTextStyle per element in a single batchUpdate.
+    For a specific element use format_slides_text. For paragraph-level
+    rules (alignment, spacing) use format_slides_paragraph. Requires the
+    presentations OAuth scope.
 
     Args:
-        presentation_id: ID of the presentation.
-        page_object_id: Optional slide ID. If provided, only formats text on
-            that one slide. If omitted, formats every slide in the presentation.
-        bold, italic, underline, strikethrough: Optional formatting flags.
-        font_family: Optional font family (e.g., "Arial").
-        font_size: Optional size in points.
-        text_color: Optional hex color (e.g., "#333333").
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Target presentation ID.
+        page_object_id: Slide objectId to scope the restyle to that one
+            slide. Omit to restyle every slide in the deck.
+        bold: True to bold, False to unbold, None to leave unchanged.
+        italic: Same semantics as bold.
+        underline: Same semantics as bold.
+        strikethrough: Same semantics as bold.
+        font_family: Font family name, e.g. "Arial".
+        font_size: Font size in points.
+        text_color: Hex color like "#333333".
+
+    Returns:
+        Confirmation with the count of elements restyled, scope (single
+        slide or whole deck), and the list of fields applied.
     """
     logger.info(
         f"[format_all_slides_text] pres='{presentation_id}' page='{page_object_id}'"
@@ -797,19 +866,34 @@ async def create_slides_text_box(
     bold: Optional[bool] = None,
     italic: Optional[bool] = None,
 ) -> str:
-    """
-    Create a text box on a slide at a given position (EMU units).
+    """Add a text box to a slide with initial content and position.
 
-    EMU reference: 914400 EMU = 1 inch. Default size roughly 3.3in x 1.1in.
+    Use this for text content; use create_slides_shape for geometric
+    shapes (rectangles, callouts, arrows). To edit text inside an
+    existing element use batch_update_presentation with insertText /
+    deleteText. All positions are in EMU (English Metric Units):
+    914400 EMU = 1 inch, 12700 EMU = 1 point. Requires the
+    presentations OAuth scope.
 
     Args:
-        page_object_id: Object ID of the slide to add the text box to.
-        text: Initial text content.
-        left, top, width, height: Position and size in EMU.
-        font_size, bold, italic: Optional text formatting.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        presentation_id: Target presentation ID.
+        page_object_id: Slide objectId where the box is placed (from
+            get_presentation.slides[].objectId).
+        text: Initial text content for the box.
+        left: X offset from slide's left edge in EMU. Default 914400
+            (1 in).
+        top: Y offset from top in EMU. Default 914400 (1 in).
+        width: Box width in EMU. Default 3000000 (≈3.28 in).
+        height: Box height in EMU. Default 1000000 (≈1.09 in).
+        font_size: Font size in points for the initial text.
+        bold: True to bold the initial text.
+        italic: True to italicize the initial text.
 
     Returns:
-        The object ID of the created text box.
+        Confirmation line containing the new text box objectId — capture
+        it for follow-up formatting/edit calls.
     """
     logger.info(
         f"[create_slides_text_box] pres='{presentation_id}' page='{page_object_id}'"

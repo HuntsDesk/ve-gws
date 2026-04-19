@@ -78,19 +78,23 @@ async def list_script_projects(
     page_size: int = 50,
     page_token: Optional[str] = None,
 ) -> str:
-    """
-    Lists Google Apps Script projects accessible to the user.
+    """Find Apps Script projects by scanning the user's Drive.
 
-    Uses Drive API to find Apps Script files.
+    Uses Drive API search (mimeType='application/vnd.google-apps.script')
+    because the Apps Script API has no list endpoint of its own. For
+    content of a specific script use get_script_project or
+    get_script_content. Requires the drive.readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        page_size: Number of results per page (default: 50)
-        page_token: Token for pagination (optional)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        page_size: Max projects per page. Default 50; Drive cap 1000.
+        page_token: Cursor from a prior response's pagination token.
 
     Returns:
-        str: Formatted list of script projects
+        Formatted list with one line per project: title, scriptId,
+        modified time, and web link. Trailing pagination token when more
+        pages exist.
     """
     return await _list_script_projects_impl(
         service, user_google_email, page_size, page_token
@@ -149,16 +153,23 @@ async def get_script_project(
     user_google_email: str,
     script_id: str,
 ) -> str:
-    """
-    Retrieves complete project details including all source files.
+    """Retrieve an Apps Script project's metadata and all file contents.
+
+    Dumps every file in the project (gs/html/json) with a 200-char source
+    preview. For the full content of one file use get_script_content. For
+    writing use update_script_content. Requires the script.projects
+    readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Apps Script project ID from list_script_projects or
+            a script URL like script.google.com/d/<scriptId>/edit.
 
     Returns:
-        str: Formatted project details with all file contents
+        Block with project title, scriptId, creator, create/modify
+        timestamps, and a numbered files list showing name, type, and a
+        200-char source preview.
     """
     return await _get_script_project_impl(service, user_google_email, script_id)
 
@@ -208,17 +219,24 @@ async def get_script_content(
     script_id: str,
     file_name: str,
 ) -> str:
-    """
-    Retrieves content of a specific file within a project.
+    """Retrieve the full source of one file in an Apps Script project.
+
+    Use this after get_script_project has surfaced the file names. For
+    project-wide overview use get_script_project. Requires the
+    script.projects readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
-        file_name: Name of the file to retrieve
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Apps Script project ID.
+        file_name: File name as it appears in the Apps Script editor
+            (without extension — e.g. "Code", "appsscript",
+            "helpers"). Matched exactly.
 
     Returns:
-        str: File content as string
+        Block with the file header (name, type) followed by the full
+        source. Returns a "not found" message when file_name doesn't
+        match any file in the project.
     """
     return await _get_script_content_impl(
         service, user_google_email, script_id, file_name
@@ -265,17 +283,24 @@ async def create_script_project(
     title: str,
     parent_id: Optional[str] = None,
 ) -> str:
-    """
-    Creates a new Apps Script project.
+    """Create a new (standalone or container-bound) Apps Script project.
+
+    Side effects: creates a new Apps Script project in Drive. Pass a
+    parent_id of a Sheet/Doc/Form/Slides file ID to create a bound
+    script; omit for a standalone script. To add files afterwards use
+    update_script_content. Requires the script.projects OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        title: Project title
-        parent_id: Optional Drive folder ID or bound container ID
+        user_google_email: The user's Google email address (authenticated
+            account).
+        title: Display title for the new project.
+        parent_id: Optional Drive ID of the container (Sheet/Doc/Form/
+            Slides) the script is bound to. Omit for a standalone
+            project.
 
     Returns:
-        str: Formatted string with new project details
+        Confirmation with the project title, new scriptId, and editor
+        URL (script.google.com/d/<id>/edit).
     """
     return await _create_script_project_impl(
         service, user_google_email, title, parent_id
@@ -319,17 +344,27 @@ async def update_script_content(
     script_id: str,
     files: List[Dict[str, str]],
 ) -> str:
-    """
-    Updates or creates files in a script project.
+    """Write files into an Apps Script project (replacing the full set).
+
+    Side effect: this is a full replace of the project's files — any
+    file NOT included in `files` is deleted. Always fetch via
+    get_script_project first, modify the set, and pass the complete
+    list back. Requires the script.projects OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
-        files: List of file objects with name, type, and source
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID.
+        files: Complete list of file objects. Each dict needs:
+            - "name" (str): file name without extension.
+            - "type" (str): "SERVER_JS", "HTML", or "JSON" (the
+              "JSON" type is only valid for the manifest file named
+              "appsscript").
+            - "source" (str): full text content.
 
     Returns:
-        str: Formatted string confirming update with file list
+        Confirmation listing the files after update (name + type per
+        entry).
     """
     return await _update_script_content_impl(
         service, user_google_email, script_id, files
@@ -392,19 +427,31 @@ async def run_script_function(
     parameters: Optional[list[object]] = None,
     dev_mode: bool = False,
 ) -> str:
-    """
-    Executes a function in a deployed script.
+    """Execute a function inside an Apps Script project.
+
+    Requires the project to have an API-executable deployment configured
+    (Deploy > New deployment > Library/API executable). dev_mode=True
+    runs the latest saved code without needing a fresh deployment —
+    available only to the script's OWN Google account. For managing
+    deployments themselves use manage_deployment. Requires the
+    script.projects OAuth scope plus any scopes the target function
+    needs.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
-        function_name: Name of function to execute
-        parameters: Optional list of parameters to pass
-        dev_mode: Whether to run latest code vs deployed version
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID (must have an API-executable
+            deployment).
+        function_name: Name of the top-level function to invoke (e.g.
+            "doWork"). Private/internal helpers cannot be called.
+        parameters: Optional positional arguments to pass to the
+            function. Must be JSON-serializable primitives or arrays.
+        dev_mode: True runs the latest saved code (owner only); False
+            (default) runs the deployed version.
 
     Returns:
-        str: Formatted string with execution result or error
+        "Execution successful" with function name and result, or
+        "Execution failed" with the error message.
     """
     return await _run_script_function_impl(
         service, user_google_email, script_id, function_name, parameters, dev_mode
@@ -475,20 +522,29 @@ async def manage_deployment(
     description: Optional[str] = None,
     version_description: Optional[str] = None,
 ) -> str:
-    """
-    Manages Apps Script deployments. Supports creating, updating, and deleting deployments.
+    """Create, update, or delete an Apps Script deployment.
+
+    Side effects: create first generates a new version then deploys it
+    (two API calls atomically); delete is destructive. To list existing
+    deployments use list_deployments. For executing code via the API use
+    run_script_function. Requires the script.deployments OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        action: Action to perform - "create", "update", or "delete"
-        script_id: The script project ID
-        deployment_id: The deployment ID (required for update and delete)
-        description: Deployment description (required for create and update)
-        version_description: Optional version description (for create only)
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "update", or "delete".
+        script_id: Target project ID.
+        deployment_id: Existing deployment ID. Required for update and
+            delete (get from list_deployments).
+        description: Deployment description shown in the Apps Script UI.
+            Required for create and update.
+        version_description: For create only — description attached to
+            the auto-created version. Defaults to `description` when
+            omitted.
 
     Returns:
-        str: Formatted string with deployment details or confirmation
+        Confirmation with deployment details (ID, version, description)
+        for create/update, or a deletion confirmation.
     """
     action = action.lower().strip()
     if action == "create":
@@ -557,16 +613,21 @@ async def list_deployments(
     user_google_email: str,
     script_id: str,
 ) -> str:
-    """
-    Lists all deployments for a script project.
+    """List all deployments (versioned snapshots) of an Apps Script project.
+
+    Deployments are how Apps Script exposes a script as a web app, API
+    executable, add-on, or library. For managing deployments use
+    manage_deployment; for code versions use list_versions. Requires the
+    script.deployments.readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID.
 
     Returns:
-        str: Formatted string with deployment list
+        Numbered list of deployments: description, deploymentId, and
+        last update time per entry.
     """
     return await _list_deployments_impl(service, user_google_email, script_id)
 
@@ -679,17 +740,23 @@ async def list_script_processes(
     page_size: int = 50,
     script_id: Optional[str] = None,
 ) -> str:
-    """
-    Lists recent execution processes for user's scripts.
+    """List recent Apps Script executions (across all scripts or one).
+
+    Useful for debugging failed runs or auditing triggered executions.
+    Reports function name, status, start time, and duration per process.
+    Requires the script.processes.readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        page_size: Number of results (default: 50)
-        script_id: Optional filter by script ID
+        user_google_email: The user's Google email address (authenticated
+            account).
+        page_size: Max processes to return. Default 50.
+        script_id: Optional — scope to a single project's executions.
+            Omit for all accessible scripts.
 
     Returns:
-        str: Formatted string with process list
+        Numbered list: function name, processStatus
+        (COMPLETED/FAILED/TIMED_OUT/CANCELED/etc.), start time, and
+        duration per process.
     """
     return await _list_script_processes_impl(
         service, user_google_email, page_size, script_id
@@ -726,18 +793,22 @@ async def delete_script_project(
     user_google_email: str,
     script_id: str,
 ) -> str:
-    """
-    Deletes an Apps Script project.
+    """Permanently delete an Apps Script project (Drive-backed).
 
-    This permanently deletes the script project. The action cannot be undone.
+    Side effects: PERMANENTLY deletes the script project via the Drive
+    API (Apps Script projects are stored as Drive files). No undo via
+    API — Drive Trash may still allow restore for up to 30 days via the
+    web UI. For disabling without deletion, remove deployments via
+    manage_deployment instead. Requires the drive full OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID to delete
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target Apps Script project ID (same as the Drive
+            file ID).
 
     Returns:
-        str: Confirmation message
+        Deletion confirmation with the deleted script ID.
     """
     return await _delete_script_project_impl(service, user_google_email, script_id)
 
@@ -787,19 +858,21 @@ async def list_versions(
     user_google_email: str,
     script_id: str,
 ) -> str:
-    """
-    Lists all versions of a script project.
+    """List all versions (immutable snapshots) of an Apps Script project.
 
-    Versions are immutable snapshots of your script code.
-    They are created when you deploy or explicitly create a version.
+    Versions are the snapshots that deployments reference. Created
+    automatically when you deploy, or manually via create_version. For
+    deployments use list_deployments. Requires the script.projects
+    readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID.
 
     Returns:
-        str: Formatted string with version list
+        Formatted version list: versionNumber, description, createTime
+        per entry.
     """
     return await _list_versions_impl(service, user_google_email, script_id)
 
@@ -846,20 +919,23 @@ async def create_version(
     script_id: str,
     description: Optional[str] = None,
 ) -> str:
-    """
-    Creates a new immutable version of a script project.
+    """Create a new immutable version snapshot of an Apps Script project.
 
-    Versions capture a snapshot of the current script code.
-    Once created, versions cannot be modified.
+    Side effects: freezes the current code into a new versionNumber.
+    Versions cannot be edited or deleted. A deployment can then be
+    pinned to this version via manage_deployment. To list versions use
+    list_versions. Requires the full script.projects OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
-        description: Optional description for this version
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID.
+        description: Optional version note (e.g. release notes, ticket
+            number).
 
     Returns:
-        str: Formatted string with new version details
+        Confirmation with the new versionNumber, description, and
+        createTime.
     """
     return await _create_version_impl(
         service, user_google_email, script_id, description
@@ -1025,20 +1101,25 @@ async def get_script_metrics(
     script_id: str,
     metrics_granularity: str = "DAILY",
 ) -> str:
-    """
-    Gets execution metrics for a script project.
+    """Fetch execution analytics (users, runs, failures) for a script.
 
-    Returns analytics data including active users, total executions,
-    and failed executions over time.
+    Returns time-series metrics over the last 7 days (DAILY) or 8 weeks
+    (WEEKLY). Useful for adoption audits and error monitoring. For
+    per-execution details use list_script_processes. Requires the
+    script.metrics readonly OAuth scope.
 
     Args:
-        service: Injected Google API service client
-        user_google_email: User's email address
-        script_id: The script project ID
-        metrics_granularity: Granularity of metrics - "DAILY" or "WEEKLY"
+        user_google_email: The user's Google email address (authenticated
+            account).
+        script_id: Target project ID.
+        metrics_granularity: "DAILY" (last 7 days) or "WEEKLY" (last 8
+            weeks). Default "DAILY".
 
     Returns:
-        str: Formatted string with metrics data
+        Formatted block with three sections — Active Users, Total
+        Executions, Failed Executions — each showing start/end time and
+        count per bucket. "No metrics data available" when the script
+        has no usage in the window.
     """
     return await _get_script_metrics_impl(
         service, user_google_email, script_id, metrics_granularity

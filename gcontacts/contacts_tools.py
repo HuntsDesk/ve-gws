@@ -671,17 +671,27 @@ async def list_contacts(
     page_token: Optional[str] = None,
     sort_order: Optional[str] = None,
 ) -> str:
-    """
-    List contacts for the authenticated user.
+    """List the authenticated user's personal Google contacts.
+
+    Returns contacts from "people/me" connections. For contact groups
+    use list_contact_groups. For a fuzzy name/email search use
+    search_contacts. For batch mutations use manage_contacts_batch.
+    Requires the contacts.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        page_size (int): Maximum number of contacts to return (default: 100, max: 1000).
-        page_token (Optional[str]): Token for pagination.
-        sort_order (Optional[str]): Sort order: "LAST_MODIFIED_ASCENDING", "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or "LAST_NAME_ASCENDING".
+        user_google_email: The user's Google email address (authenticated
+            account).
+        page_size: Max contacts per page. 1-1000. Default 100.
+        page_token: Cursor from a prior response's "Next page token"
+            line. Omit for first page.
+        sort_order: "LAST_MODIFIED_ASCENDING",
+            "LAST_MODIFIED_DESCENDING", "FIRST_NAME_ASCENDING", or
+            "LAST_NAME_ASCENDING".
 
     Returns:
-        str: List of contacts with their basic information.
+        Formatted list with contact name, primary email, phone, org, and
+        resourceName per entry, plus a trailing "Next page token:" line
+        when more pages exist.
     """
     logger.info(f"[list_contacts] Invoked. Email: '{user_google_email}'")
 
@@ -733,15 +743,23 @@ async def get_contact(
     user_google_email: str,
     contact_id: str,
 ) -> str:
-    """
-    Get detailed information about a specific contact.
+    """Fetch a single contact with all details (emails, phones, orgs, addresses).
+
+    Use this when you already have a contact ID from list_contacts or
+    search_contacts and need the full record (including notes, addresses,
+    multiple emails/phones). For creating/updating use manage_contact.
+    Requires the contacts.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        contact_id (str): The contact ID (e.g., "c1234567890" or full resource name "people/c1234567890").
+        user_google_email: The user's Google email address (authenticated
+            account).
+        contact_id: Contact ID — either the short form ("c1234567890")
+            or the full resource name ("people/c1234567890"). The short
+            form is auto-prefixed.
 
     Returns:
-        str: Detailed contact information.
+        Multi-section detail block with names, emails, phones,
+        organizations, addresses, notes, resourceName, and etag.
     """
     # Normalize resource name
     if not contact_id.startswith("people/"):
@@ -775,16 +793,25 @@ async def search_contacts(
     query: str,
     page_size: int = 30,
 ) -> str:
-    """
-    Search contacts by name, email, phone number, or other fields.
+    """Search contacts by substring across names, emails, phones.
+
+    Uses the People API searchContacts endpoint (max 30 results). For
+    paginated full enumeration use list_contacts. For a known contact ID
+    use get_contact. A cache warm-up call is issued on first use since
+    the search index is user-specific and lazily populated. Requires the
+    contacts.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        query (str): Search query string (searches names, emails, phone numbers).
-        page_size (int): Maximum number of results to return (default: 30, max: 30).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        query: Free text substring. Matches names, email addresses, and
+            phone numbers.
+        page_size: Max results. 1-30. Default 30 (API cap).
 
     Returns:
-        str: Matching contacts with their basic information.
+        Formatted list of matching contacts with name, primary email,
+        phone, org, and resourceName. Empty match returns a clear
+        "no contacts" message.
     """
     logger.info(
         f"[search_contacts] Invoked. Email: '{user_google_email}', Query: '{query}'"
@@ -1070,16 +1097,24 @@ async def list_contact_groups(
     page_size: int = 100,
     page_token: Optional[str] = None,
 ) -> str:
-    """
-    List contact groups (labels) for the user.
+    """List contact groups (labels) visible to the user.
+
+    Contact groups are the "labels" you see in Google Contacts sidebar
+    (e.g. "Family", "Starred"). Use this to discover group IDs for
+    get_contact_group or manage_contact_group. Requires the
+    contacts.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        page_size (int): Maximum number of groups to return (default: 100, max: 1000).
-        page_token (Optional[str]): Token for pagination.
+        user_google_email: The user's Google email address (authenticated
+            account).
+        page_size: Max groups per page. 1-1000. Default 100.
+        page_token: Cursor from a prior response's "Next page token" line.
 
     Returns:
-        str: List of contact groups with their details.
+        Formatted list with group name, ID, group type
+        (USER_CONTACT_GROUP / SYSTEM_CONTACT_GROUP), and member count
+        per entry. Trailing "Next page token:" line when more pages
+        exist.
     """
     logger.info(f"[list_contact_groups] Invoked. Email: '{user_google_email}'")
 
@@ -1133,16 +1168,23 @@ async def get_contact_group(
     group_id: str,
     max_members: int = 100,
 ) -> str:
-    """
-    Get details of a specific contact group including its members.
+    """Fetch a contact group's details and list of member contact IDs.
+
+    Use get_contact on each returned member ID to fetch full member
+    records. For managing group membership (add/remove contacts) use
+    manage_contact_group. Requires the contacts.readonly OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        group_id (str): The contact group ID.
-        max_members (int): Maximum number of members to return (default: 100, max: 1000).
+        user_google_email: The user's Google email address (authenticated
+            account).
+        group_id: Group ID — short ("myContacts"/"starred"/"abc123") or
+            full resource name ("contactGroups/abc123"). Auto-prefixed
+            when short.
+        max_members: Max members to return. 1-1000. Default 100.
 
     Returns:
-        str: Contact group details including members.
+        Block with group name, ID, type, total member count, and a
+        members list showing each contact's ID (use with get_contact).
     """
     # Normalize resource name
     if not group_id.startswith("contactGroups/"):
@@ -1475,24 +1517,31 @@ async def manage_contact_group(
     add_contact_ids: Optional[StringList] = None,
     remove_contact_ids: Optional[StringList] = None,
 ) -> str:
-    """
-    Create, update, delete a contact group, or modify its members. Consolidated tool
-    replacing create_contact_group, update_contact_group, delete_contact_group, and
-    modify_contact_group_members.
+    """Create, update, delete, or modify members of a contact group.
+
+    Side effects: create/update/delete mutates the group itself;
+    modify_members shifts contact membership without deleting contacts
+    (unless action="delete" with delete_contacts=True). For reading use
+    list_contact_groups / get_contact_group. Requires the contacts
+    OAuth scope.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
-        action (str): The action to perform: "create", "update", "delete", or "modify_members".
-        group_id (Optional[str]): The contact group ID. Required for "update", "delete",
-            and "modify_members" actions.
-        name (Optional[str]): The group name. Required for "create" and "update" actions.
-        delete_contacts (bool): If True and action is "delete", also delete contacts in
-            the group (default: False).
-        add_contact_ids (Optional[List[str]]): Contact IDs to add (for "modify_members").
-        remove_contact_ids (Optional[List[str]]): Contact IDs to remove (for "modify_members").
+        user_google_email: The user's Google email address (authenticated
+            account).
+        action: "create", "update", "delete", or "modify_members".
+        group_id: Group ID (short or "contactGroups/<id>"). Required for
+            update, delete, modify_members.
+        name: New group display name. Required for create and update.
+        delete_contacts: Only with action="delete". True also deletes
+            contacts inside the group; False (default) keeps them.
+        add_contact_ids: For modify_members — contact IDs to add. Short
+            or "people/<id>"; auto-prefixed.
+        remove_contact_ids: For modify_members — contact IDs to remove.
 
     Returns:
-        str: Result of the action performed.
+        Confirmation describing the operation: created/updated group
+        details, deletion confirmation, or modify-members summary with
+        counts plus any notFound / cannot-remove IDs the API reported.
     """
     action = action.lower().strip()
     if action not in ("create", "update", "delete", "modify_members"):
