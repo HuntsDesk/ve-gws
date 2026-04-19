@@ -2175,11 +2175,32 @@ async def add_sheet_named_range(
     range_name: str,
 ) -> str:
     """
-    Create a named range that can be referenced by formulas.
+    Define a named range that formulas and scripts can reference by name.
+
+    Creates a persistent alias for a range — e.g., `=SUM(TaxRate)` instead of
+    `=SUM(Config!B2:B2)`. Named ranges show up in the Data > Named ranges
+    sidebar and in formula autocomplete. Makes formulas more readable and
+    lets you move the underlying cells without breaking references. To use
+    the named range, write it bare in a formula (`=TaxRate`) — no quotes,
+    no sheet prefix.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/spreadsheets` (write).
 
     Args:
-        name: The name of the range (must be a valid Sheets identifier, e.g., "TaxRate").
-        range_name: A1 range (e.g., "Sheet1!A1:B10").
+        spreadsheet_id: Google Sheets spreadsheet ID (from the URL after `/d/`).
+        name: Identifier for the range. Must start with a letter or underscore;
+            can contain letters, digits, underscores. No spaces or special
+            characters. Cannot be the same as an A1 cell reference (e.g., `A1`,
+            `B2` are rejected). Examples: `TaxRate`, `Q1_Revenue`, `_Config`.
+        range_name: A1-notation range being named. Sheet name required for
+            multi-sheet workbooks, e.g., `"Sheet1!A1:B10"`, `"Config!B2"`.
+            Single cells work (`Sheet1!B2`). Full-column/row refs
+            (`Sheet1!A:A`, `Sheet1!1:1`) are accepted. Sheet names with spaces
+            must be single-quoted: `"'My Sheet'!A1:B5"`.
+
+    Returns:
+        Summary string: "Created named range '<name>' (ID: <namedRangeId>)
+        covering '<range_name>' in spreadsheet '<id>' for <email>."
     """
     logger.info(
         f"[add_sheet_named_range] spreadsheet='{spreadsheet_id}' name='{name}' range='{range_name}'"
@@ -2223,13 +2244,42 @@ async def protect_sheet_range(
     warning_only: bool = False,
 ) -> str:
     """
-    Protect a range so that only specified editors can modify it.
+    Protect a range in a spreadsheet so unauthorized users cannot edit it.
+
+    Adds a Sheets "Protected range" entry (Data > Protect sheets and ranges)
+    restricting who can modify the cells. Two enforcement modes: strict
+    (non-editors are blocked) or warning-only (a confirmation dialog appears,
+    but edits are allowed). Use strict for financial data, formula cells,
+    or anything where an accidental overwrite would corrupt downstream calcs.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/spreadsheets` (write).
+    Protection does NOT prevent the owner or anyone with file-level "Editor"
+    permission on the Drive file from bypassing via the Sheets UI — it only
+    gates in-cell edits. For hard access control, use Drive sharing.
 
     Args:
-        range_name: A1 range to protect.
-        description: Optional description of the protection.
-        editor_emails: List of user emails allowed to edit. If omitted, only the owner can.
-        warning_only: If True, shows warning but allows edits. If False, strictly blocks.
+        spreadsheet_id: Google Sheets spreadsheet ID (from the URL after `/d/`).
+        range_name: A1-notation range to protect, e.g., `"Sheet1!A1:D10"`,
+            `"Summary!B:B"` (entire column), `"'My Sheet'!A1:Z100"` (sheet
+            name with spaces). To protect an entire sheet, use
+            `manage_sheet_tabs` or pass the full sheet range
+            (`Sheet1!A1:ZZ1000000`).
+        description: Human-readable note shown in the Protected ranges sidebar
+            (e.g., "Formulas — do not edit"). Omit for no description.
+        editor_emails: List of Google account email addresses allowed to edit
+            this range. Omit (or pass `None`) to restrict edits to the
+            spreadsheet owner only. Editors must already have access to the
+            file at the Drive level; adding emails here does not share the
+            file.
+        warning_only: When `True`, edits are allowed after a "Are you sure?"
+            confirmation dialog (suitable for nudging users). When `False`
+            (default), edits are strictly blocked for non-editors.
+
+    Returns:
+        Summary string: "Protected range '<range_name>' (ID: <protectedRangeId>,
+        mode: <strict|warning-only>) in spreadsheet '<id>' for <email>."
+        The `protectedRangeId` can be used to remove the protection later via
+        `batchUpdate` with `deleteProtectedRange`.
     """
     logger.info(
         f"[protect_sheet_range] spreadsheet='{spreadsheet_id}' range='{range_name}'"
@@ -2278,13 +2328,40 @@ async def manage_sheet_tabs(
     new_name: Optional[str] = None,
 ) -> str:
     """
-    Rename, delete, or duplicate a sheet tab within a spreadsheet.
+    Rename, delete, or duplicate a sheet tab inside a spreadsheet.
+
+    Single entrypoint for the three most common tab lifecycle operations.
+    To CREATE a new tab from scratch, use `create_sheet` (separate tool).
+    To reorder tabs, use `batch_update` with `updateSheetProperties.index`.
+    Deletion is permanent — the undo is only available through the Sheets UI,
+    not via the API.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/spreadsheets` (write).
 
     Args:
-        action: One of "rename", "delete", "duplicate".
-        sheet_id: Numeric sheet ID (preferred). Either this or sheet_name required.
-        sheet_name: Sheet tab name. Used if sheet_id not provided (will be looked up).
-        new_name: Required for "rename" and "duplicate" actions — the new tab name.
+        spreadsheet_id: Google Sheets spreadsheet ID (from the URL after `/d/`).
+        action: Which operation to perform. One of:
+            - `"rename"` — change the tab's title. Requires `new_name`.
+            - `"delete"` — remove the tab and all its data. Cannot delete the
+              last remaining sheet in a spreadsheet (Google API error).
+            - `"duplicate"` — create a copy of the tab. `new_name` optional
+              (defaults to "Copy of <original>").
+        sheet_id: Numeric sheet ID (NOT the spreadsheet ID). Preferred over
+            `sheet_name` because it's unique and stable. Get it from
+            `get_spreadsheet_info` under `sheets[].properties.sheetId`. The
+            first sheet is typically `0`. Either `sheet_id` or `sheet_name`
+            must be provided.
+        sheet_name: Tab title (case-sensitive). Used only when `sheet_id` is
+            omitted — the tool looks up the ID by name. Ambiguous if multiple
+            tabs share the name (rare — Sheets UI normally prevents this).
+        new_name: New title for the tab. Required for `"rename"`. Optional
+            for `"duplicate"` (auto-generated if omitted). Ignored for
+            `"delete"`. Must be unique within the spreadsheet.
+
+    Returns:
+        Summary string: "Completed '<action>' on sheet_id=<id> in spreadsheet
+        '<id>' for <email>." For `"duplicate"`, appends: " New sheet: '<title>'
+        (ID: <new_sheetId>).", giving you the ID for chaining further calls.
     """
     logger.info(
         f"[manage_sheet_tabs] action='{action}' sheet_id={sheet_id} sheet_name='{sheet_name}'"

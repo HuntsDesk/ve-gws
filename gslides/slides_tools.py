@@ -525,14 +525,54 @@ async def format_slides_paragraph(
     end_index: Optional[int] = None,
 ) -> str:
     """
-    Apply paragraph formatting to text in a slide element.
+    Apply paragraph-level formatting (alignment, spacing, bullets) to text
+    inside a shape, text box, or table cell on a Google Slide.
+
+    Use this for paragraph concerns — alignment, line spacing, space above/below,
+    bullet lists. For character-level styling (bold, font size, color), use
+    `format_slides_text` instead. For styling the shape itself (fill, outline,
+    shadow), use `style_slides_shape`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Idempotent: re-running with the same values is safe. No rate limits beyond
+    Google Slides API defaults (~300 req/min per user).
 
     Args:
-        alignment: One of START, CENTER, END, JUSTIFIED.
-        line_spacing: Line spacing as percentage (100.0 = single, 150.0 = 1.5x).
-        space_above, space_below: Paragraph spacing in points.
-        bullet_preset: Bullet style preset (e.g., BULLET_DISC_CIRCLE_SQUARE,
-            NUMBERED_DIGIT_ALPHA_ROMAN). Pass "NONE" to remove bullets.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_element_id: Object ID of the target shape/text box/table cell.
+            Get it from `get_presentation` or `get_page`. Must be a text-bearing
+            element; passing an image element will return a no-op error.
+        alignment: Paragraph horizontal alignment. One of `START` (left),
+            `CENTER`, `END` (right), `JUSTIFIED`. Omit to leave unchanged.
+        line_spacing: Line spacing as percentage — `100.0` = single-spaced,
+            `115.0` = 1.15x (Google Docs default), `150.0` = 1.5x, `200.0` = double.
+            Omit to leave unchanged.
+        space_above: Points of space above each paragraph (e.g., `12` for
+            ~12pt gap). Omit to leave unchanged.
+        space_below: Points of space below each paragraph. Omit to leave unchanged.
+        bullet_preset: Bullet list preset name from the Google Slides API, e.g.,
+            `BULLET_DISC_CIRCLE_SQUARE`, `BULLET_DIAMONDX_ARROW3D_SQUARE`,
+            `NUMBERED_DIGIT_ALPHA_ROMAN`, `NUMBERED_UPPERALPHA_ALPHA_ROMAN`.
+            Pass `NONE` (uppercase) to REMOVE existing bullets. Omit to leave
+            bullet state unchanged.
+        start_index: Optional 0-based character offset within the element's
+            text where formatting starts. When both start/end are omitted,
+            formatting applies to ALL paragraphs in the element.
+        end_index: Optional 0-based character offset (exclusive) where
+            formatting ends. Must be greater than start_index if both provided.
+
+    Returns:
+        Summary string: "Applied paragraph formatting to element '<id>' in
+        presentation '<id>' for <email> (<N> request(s))." When no formatting
+        args are passed: "No paragraph formatting options were provided."
+
+    Common usage patterns:
+        - Title centered + bigger gap below:
+            alignment=CENTER, space_below=12
+        - Indented bullet list:
+            bullet_preset=BULLET_DISC_CIRCLE_SQUARE
+        - Strip bullets from a list that was pasted in:
+            bullet_preset=NONE
     """
     logger.info(
         f"[format_slides_paragraph] pres='{presentation_id}' element='{page_element_id}'"
@@ -614,14 +654,39 @@ async def style_slides_shape(
     outline_dash_style: Optional[str] = None,
 ) -> str:
     """
-    Style a shape's fill and outline.
+    Style an existing shape's fill and outline on a Google Slide.
+
+    Use this to change the look of a shape that already exists — background
+    fill color/opacity, outline color, outline thickness, dash pattern.
+    For paragraph-level text formatting inside the shape (alignment, bullets),
+    use `format_slides_paragraph`. For character styling of text (bold, font
+    size), use `format_slides_text`. To create the shape in the first place,
+    use `create_slides_shape`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Only fields passed in will be updated — omitted args are left unchanged.
 
     Args:
-        fill_color: Hex color for shape background (e.g., "#FFCC00").
-        fill_alpha: Alpha 0.0-1.0 for fill.
-        outline_color: Hex color for shape outline.
-        outline_weight: Outline thickness in points.
-        outline_dash_style: SOLID, DASH, DOT, DASH_DOT, LONG_DASH, LONG_DASH_DOT.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_element_id: Object ID of the target shape. Get it from
+            `get_presentation.slides[].pageElements[].objectId` or `get_page`.
+            Must be a shape element; table cells and images will error.
+        fill_color: Hex color for the shape interior, e.g., `#FFCC00` or
+            `FFCC00`. Omit to leave existing fill unchanged.
+        fill_alpha: Opacity of the fill, 0.0 (transparent) to 1.0 (opaque).
+            Default `1.0`. Only meaningful when `fill_color` is also set.
+        outline_color: Hex color for the shape's outline/border, e.g., `#000000`.
+            Omit to leave outline color unchanged.
+        outline_weight: Outline thickness in points (e.g., `1.5`, `3`, `6`).
+            Omit to leave outline weight unchanged.
+        outline_dash_style: Line style for the outline. One of `SOLID`, `DASH`,
+            `DOT`, `DASH_DOT`, `LONG_DASH`, `LONG_DASH_DOT`. Omit to leave
+            unchanged.
+
+    Returns:
+        Summary string: "Styled shape '<id>' in presentation '<id>' for
+        <email> (fields: <comma-separated list of changed fields>)." When no
+        style args are passed: "No shape style options were provided."
     """
     logger.info(
         f"[style_slides_shape] pres='{presentation_id}' element='{page_element_id}'"
@@ -674,12 +739,28 @@ async def set_slides_background(
     alpha: float = 1.0,
 ) -> str:
     """
-    Set the background color of a slide.
+    Set the background fill color of a single slide (the page itself).
+
+    Changes the slide's own background — distinct from styling a shape placed
+    on the slide. For per-shape fill, use `style_slides_shape`. To change
+    background for multiple slides, call this tool once per slide.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Overrides any inherited master/layout background with a solid color.
 
     Args:
-        page_object_id: Object ID of the slide.
-        color: Hex color (e.g., "#F5F5F5").
-        alpha: 0.0-1.0.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the slide whose background to change.
+            Get it from `get_presentation.slides[].objectId`. Must reference
+            a slide page (not a master/layout).
+        color: Hex color for the background, e.g., `#F5F5F5` or `F5F5F5`.
+            Accepts `#RRGGBB` or `RRGGBB`.
+        alpha: Opacity of the background fill, 0.0 (transparent) to 1.0
+            (opaque). Default `1.0`.
+
+    Returns:
+        Summary string: "Set background of slide '<id>' to <color> in
+        presentation '<id>' for <email>."
     """
     logger.info(
         f"[set_slides_background] pres='{presentation_id}' page='{page_object_id}'"
@@ -800,13 +881,49 @@ async def create_slides_shape(
     fill_color: Optional[str] = None,
 ) -> str:
     """
-    Create a shape on a slide.
+    Create a new shape element (rectangle, ellipse, arrow, etc.) on a Google Slide.
+
+    Use this to build layouts programmatically — callouts, diagrams, backgrounds.
+    For a TEXT-focused box, use `create_slides_text_box` (simpler + auto-sized
+    for text). For styling an EXISTING shape (outline, shadow, filled color),
+    use `style_slides_shape`. To add text inside a shape after creation, use
+    `batch_update_presentation` with `insertText`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Creates exactly one shape per call. Returns the new shape's object ID so
+    you can reference it in follow-up calls (inserting text, setting fill, etc.).
 
     Args:
-        shape_type: One of RECTANGLE, ROUND_RECTANGLE, ELLIPSE, TRIANGLE, DIAMOND,
-            STAR_5, ARROW_RIGHT, etc. See Google Slides API Shape enum.
-        left, top, width, height: Position/size in EMU.
-        fill_color: Optional hex color for the shape fill.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the slide where the shape will be placed.
+            Get it from `get_presentation.slides[].objectId` or `get_page`.
+        shape_type: Shape enum from Google's API. Common values:
+            `RECTANGLE`, `ROUND_RECTANGLE`, `ELLIPSE`, `TRIANGLE`, `RIGHT_TRIANGLE`,
+            `DIAMOND`, `PENTAGON`, `HEXAGON`, `OCTAGON`, `PARALLELOGRAM`, `TRAPEZOID`,
+            `STAR_5`, `STAR_6`, `STAR_8`, `STAR_12`, `STAR_16`, `STAR_24`, `STAR_32`,
+            `ARROW_RIGHT`, `ARROW_LEFT`, `ARROW_UP`, `ARROW_DOWN`, `LEFT_RIGHT_ARROW`,
+            `CLOUD`, `SUN`, `MOON`, `HEART`, `LIGHTNING_BOLT`, `SPEECH`, `CLOUD_CALLOUT`.
+            Full list: https://developers.google.com/slides/api/reference/rest/v1/pages/pageElements#Type
+        left: X position (top-left corner) in EMUs (English Metric Units).
+            Default `914400` EMU = 1 inch from the slide's left edge.
+            Conversion: 1 inch = 914,400 EMU; 1 point = 12,700 EMU; 1 cm = 360,000 EMU.
+        top: Y position (top-left corner) in EMUs. Default `914400` = 1 inch down.
+        width: Shape width in EMUs. Default `2000000` ≈ 2.19 inches.
+        height: Shape height in EMUs. Default `2000000` ≈ 2.19 inches.
+        fill_color: Optional hex color for the shape interior, e.g., `#4285F4`.
+            Accepts `#RRGGBB` or `RRGGBB`. Omit for the default transparent fill
+            (shape renders as an outline only until you set a fill later).
+
+    Returns:
+        Summary string: "Created <shape_type> shape '<id>' on slide '<id>' in
+        presentation '<id>' for <email>." The object ID in the string is the
+        newly-created shape — capture it if you need to modify the shape later
+        (add text, change fill, style borders, etc.).
+
+    Example: centered 3-inch rectangle with blue fill:
+        left=1828800 (2 inches), top=1371600 (1.5 inches),
+        width=2743200 (3 inches), height=914400 (1 inch),
+        shape_type='RECTANGLE', fill_color='#4285F4'
     """
     logger.info(
         f"[create_slides_shape] pres='{presentation_id}' page='{page_object_id}' shape='{shape_type}'"
@@ -855,11 +972,31 @@ async def get_slides_speaker_notes(
     slide_index: Optional[int] = None,
 ) -> str:
     """
-    Read speaker notes from a slide.
+    Read the speaker notes text from a single slide.
+
+    Returns the plain-text contents of the slide's speaker-notes pane (the area
+    shown to the presenter in Presenter View, hidden from the audience). Useful
+    for auditing/exporting notes, reviewing coverage per slide, or piping into
+    transcripts. To modify notes, use `update_slides_speaker_notes`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations.readonly`
+    (or broader). Read-only — safe to call repeatedly.
 
     Args:
-        page_object_id: Object ID of the slide. Either this or slide_index is required.
-        slide_index: 0-based slide index. Used if page_object_id not provided.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the target slide. Either this OR
+            `slide_index` is required. Get it from
+            `get_presentation.slides[].objectId`. Preferred over `slide_index`
+            because object IDs are stable across slide reordering.
+        slide_index: 0-based position of the slide in the deck. Used only if
+            `page_object_id` is not provided. Index 0 = first slide.
+
+    Returns:
+        When notes exist: "Speaker notes for slide '<id>' in presentation
+        '<id>':\\n\\n<notes text>". When the slide has no notes: "No speaker
+        notes on slide '<id>' in presentation '<id>'.". When neither locator
+        resolves: "Slide not found in presentation '<id>'. Tried
+        page_object_id=..., slide_index=...".
     """
     logger.info(
         f"[get_slides_speaker_notes] pres='{presentation_id}' page='{page_object_id}' idx={slide_index}"
@@ -906,11 +1043,31 @@ async def update_slides_speaker_notes(
     notes: str,
 ) -> str:
     """
-    Replace the speaker notes on a slide.
+    Replace the speaker notes on a slide (deletes existing, inserts new).
+
+    Fully overwrites the slide's speaker-notes pane — this is NOT an append.
+    Existing notes are deleted first, then the new text is inserted. Pass an
+    empty string to clear notes without adding any. To read current notes
+    before overwriting, use `get_slides_speaker_notes`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
 
     Args:
-        page_object_id: Object ID of the slide.
-        notes: New speaker notes text (replaces existing).
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the target slide. Get it from
+            `get_presentation.slides[].objectId`. Must reference an existing
+            slide with a notes-page shape; if the slide has no notes shape
+            (rare — some custom layouts), the call returns an error string
+            rather than failing.
+        notes: New speaker notes text to insert. Plain text only (no rich
+            formatting). Replaces ALL existing notes on this slide. Pass `""`
+            to clear without adding.
+
+    Returns:
+        Summary string: "Updated speaker notes on slide '<id>' in presentation
+        '<id>' for <email>." If the slide lacks a notes shape: "No speaker-notes
+        shape found on slide '<id>'. Unable to update notes." If both existing
+        notes were empty and `notes` is empty: "No changes to apply."
     """
     logger.info(
         f"[update_slides_speaker_notes] pres='{presentation_id}' page='{page_object_id}'"
@@ -981,11 +1138,39 @@ async def insert_slides_image(
     height: float = 2000000,
 ) -> str:
     """
-    Insert an image onto a slide from a public URL.
+    Insert an image onto a slide from a publicly accessible URL.
+
+    Google Slides fetches the image from the URL at insert time and embeds a
+    reference in the presentation. The URL must be publicly accessible (or
+    accessible to Google's servers) at the moment of the call — private Drive
+    URLs, signed URLs, and localhost URLs will fail. Supported formats: PNG,
+    JPEG, GIF (Slides does not embed SVG).
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Returns the new image's object ID so you can reference it later (reposition,
+    resize, delete, etc.). Image size limit: 50 MB, 25 megapixels.
 
     Args:
-        image_url: Publicly accessible image URL.
-        left, top, width, height: Position/size in EMU.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the slide to place the image on. Get it
+            from `get_presentation.slides[].objectId`.
+        image_url: Publicly accessible HTTPS URL pointing to a PNG/JPEG/GIF.
+            Google fetches this URL server-side; must return the image bytes
+            directly (no login walls, redirects to interstitial pages, etc.).
+        left: X position (top-left corner) in EMUs (English Metric Units).
+            Default `914400` EMU = 1 inch from the slide's left edge.
+            Conversion: 1 inch = 914,400 EMU; 1 point = 12,700 EMU.
+        top: Y position (top-left corner) in EMUs. Default `914400` = 1 inch down.
+        width: Image width in EMUs. Default `3000000` ≈ 3.28 inches. Image is
+            stretched/compressed to this size; aspect ratio is NOT preserved
+            automatically — compute width:height from the source image to avoid
+            distortion.
+        height: Image height in EMUs. Default `2000000` ≈ 2.19 inches.
+
+    Returns:
+        Summary string: "Inserted image '<id>' on slide '<id>' in presentation
+        '<id>' for <email>." The object ID in the string is the newly-created
+        image element — capture it for follow-up operations.
     """
     logger.info(
         f"[insert_slides_image] pres='{presentation_id}' page='{page_object_id}'"
@@ -1018,10 +1203,29 @@ async def delete_slides_element(
     object_id: str,
 ) -> str:
     """
-    Delete a slide, shape, text box, image, or other page element.
+    Delete any object from a Google Slides presentation by its object ID.
+
+    Works on any deletable object: an entire slide, a shape, a text box, an
+    image, a table, a chart, a video, a line, etc. Passing a slide's object ID
+    removes the whole slide (and everything on it). Passing a page element's
+    object ID removes only that element. Deletion is permanent via API — use
+    the Slides UI's undo if you need to recover.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    **Not idempotent**: re-calling with the same ID after success returns an
+    error because the object no longer exists.
 
     Args:
-        object_id: Object ID of the element (or slide) to delete.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        object_id: Object ID of the slide or page element to delete. Get slide
+            IDs from `get_presentation.slides[].objectId`. Get element IDs
+            from `get_presentation.slides[].pageElements[].objectId` or from
+            the return value of creator tools (`create_slides_shape`,
+            `insert_slides_image`, etc.). Cannot delete master/layout pages.
+
+    Returns:
+        Summary string: "Deleted element '<id>' from presentation '<id>' for
+        <email>."
     """
     logger.info(f"[delete_slides_element] pres='{presentation_id}' obj='{object_id}'")
     await slides_batch_update(
@@ -1045,12 +1249,38 @@ async def replace_slides_text(
     match_case: bool = True,
 ) -> str:
     """
-    Find and replace text throughout a presentation.
+    Find-and-replace a literal string across every text element in the deck.
+
+    Scans all slides, text boxes, shapes, table cells, and speaker notes.
+    Replaces every occurrence of `find_text` with `replace_text` in a single
+    batch operation. Plain substring match — no regex, wildcards, or whole-word
+    matching. To do scoped replacement within a single element, edit the text
+    range directly via `format_slides_text` or `modify_doc_text` equivalents.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Idempotent: re-running after all matches are replaced is a no-op (returns
+    0 occurrences).
 
     Args:
-        find_text: Text to search for.
-        replace_text: Replacement text.
-        match_case: Whether to match case (default True).
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        find_text: Literal text to search for. Exact-match substring; no
+            regex, no special characters. Must be non-empty (empty string
+            errors). Newlines inside `find_text` only match if the original
+            document has the same literal newline characters.
+        replace_text: Text to substitute for each occurrence. Can be empty to
+            effectively delete matches.
+        match_case: When `True` (default), matching is case-sensitive (`Hello`
+            won't match `hello`). When `False`, case-insensitive — any
+            capitalization variant matches and is replaced by the literal
+            `replace_text` verbatim (original casing is not preserved).
+
+    Returns:
+        Summary string: "Replaced <N> occurrence(s) of '<find_text>' with
+        '<replace_text>' in presentation '<id>' for <email>." Where N is
+        `0` if nothing matched.
+
+    Common usage: template-filling — put `{{placeholder}}` markers in a slide
+    template, then call this once per placeholder with the real values.
     """
     logger.info(
         f"[replace_slides_text] pres='{presentation_id}' find='{find_text}'"
@@ -1087,13 +1317,29 @@ async def duplicate_slide(
     page_object_id: str,
 ) -> str:
     """
-    Duplicate a slide (or any object) within a presentation.
+    Duplicate a slide (or any single page element) within a presentation.
+
+    Creates an exact copy — same layout, content, text, styling, speaker notes
+    (for slides). The duplicate is inserted immediately after the source in
+    slide order. Returns the new object's ID so you can modify the copy
+    independently. To move the duplicate to a different position, chain with
+    `reorder_slides`. To copy a slide into a DIFFERENT presentation, use the
+    Drive copy + batch-update pattern (not this tool).
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Each call duplicates one object; to duplicate many, call in a loop.
 
     Args:
-        page_object_id: Object ID of the slide/object to duplicate.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        page_object_id: Object ID of the slide OR page element to duplicate.
+            Get slide IDs from `get_presentation.slides[].objectId`. Get element
+            IDs from `slides[].pageElements[].objectId`. Duplicating a slide
+            clones everything on it; duplicating a shape clones just that shape.
 
     Returns:
-        The object ID of the new duplicate.
+        Summary string: "Duplicated '<original_id>' as '<new_id>' in
+        presentation '<id>' for <email>." Parse out `<new_id>` (between
+        `as '` and `'`) to reference the duplicate in follow-up calls.
     """
     logger.info(
         f"[duplicate_slide] pres='{presentation_id}' page='{page_object_id}'"
@@ -1124,11 +1370,35 @@ async def reorder_slides(
     insertion_index: int,
 ) -> str:
     """
-    Move one or more slides to a new position.
+    Move one or more slides to a new position in the deck.
+
+    Reorders slides by inserting them at `insertion_index` in the slide list.
+    When multiple slide IDs are passed, they are placed consecutively at the
+    target position, preserving the order given in `slide_object_ids`. This
+    tool only reorders slides — it does not reorder page elements inside a
+    slide. For that, use `batch_update_presentation` with `updatePageElementZOrder`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/presentations` (write).
+    Google Slides API enforces that all listed IDs must currently belong to
+    the presentation; mixing element IDs with slide IDs is an error.
 
     Args:
-        slide_object_ids: List of slide object IDs to move.
-        insertion_index: 0-based index where the slides should be inserted.
+        presentation_id: Google Slides presentation ID (from the URL after `/d/`).
+        slide_object_ids: List of slide object IDs to move, in the order you
+            want them to appear after the move. Each must be a slide page ID
+            (from `get_presentation.slides[].objectId`), not a page element.
+            Example: `["slide_3", "slide_1"]` will place slide_3 first, then
+            slide_1 at `insertion_index`.
+        insertion_index: 0-based position in the re-ordered deck where the
+            moved slides start. `0` = move to the front. Index is computed
+            AFTER removing the slides being moved — pass the final desired
+            position, not adjusted math. To move slides to the end, use the
+            current slide count (e.g., if the deck has 10 slides, `10` puts
+            them last; the API clamps out-of-range values to end-of-deck).
+
+    Returns:
+        Summary string: "Moved <N> slide(s) to position <index> in presentation
+        '<id>' for <email>."
     """
     logger.info(
         f"[reorder_slides] pres='{presentation_id}' ids={slide_object_ids} -> {insertion_index}"

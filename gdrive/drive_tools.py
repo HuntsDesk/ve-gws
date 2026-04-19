@@ -2395,14 +2395,37 @@ async def get_drive_revisions(
     page_size: int = 25,
 ) -> str:
     """
-    List revision history for a Drive file.
+    List the revision history for a Drive file, newest first.
 
-    Returns each revision's ID, modified time, last-modifying user, and size
-    (when available). Useful before calling restore_drive_revision.
+    Returns each revision's ID, modification timestamp, last-modifying user
+    (display name + email), size in bytes (when available), MIME type, and
+    whether it's pinned via `keepForever`. Use this to discover revision IDs
+    before calling `restore_drive_revision`, or to audit who changed what.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/drive.readonly`
+    (or broader). Read-only.
+
+    **Limitation**: Google-native files (Docs, Sheets, Slides) expose revisions
+    in the API list but their binary content is not retrievable — only
+    non-native files (PDF, DOCX, images, etc.) support content restore. By
+    default, Drive retains up to 100 revisions or 30 days, whichever comes
+    first, unless a revision is pinned (`keepForever: true`).
 
     Args:
-        file_id: Drive file ID.
-        page_size: Maximum revisions to return (1-1000). Default 25.
+        file_id: Drive file ID (from a file URL like
+            `drive.google.com/file/d/<file_id>/view`, or from `search_drive_files`,
+            or from `get_drive_file_metadata`).
+        page_size: Maximum number of revisions to return. Clamped to `[1, 1000]`.
+            Default `25`. No pagination token support in this tool — if the
+            file has more than `page_size` revisions, only the most recent are
+            returned.
+
+    Returns:
+        Multi-line string. First line: "Revisions for file <id> (<count>):".
+        Each subsequent line: "  - <revId> | <modifiedTime ISO8601> | <user or
+        email> | size: <bytes or n/a>[ [keepForever]]". If the file has no
+        revisions or revisions aren't supported: "No revisions found for file
+        <id> (or file does not support revisions)."
     """
     logger.info(f"[get_drive_revisions] file='{file_id}' page_size={page_size}")
 
@@ -2441,16 +2464,40 @@ async def restore_drive_revision(
     revision_id: str,
 ) -> str:
     """
-    Restore a Drive file to a previous revision.
+    Restore a Drive file's content to a previous revision.
 
-    Downloads the revision's raw content and re-uploads it as the current version.
-    Works for binary file types (PDFs, DOCX, images, etc.). Google-native files
-    (Docs, Sheets, Slides) do not expose raw revision content via the API —
-    for those, use the Google Docs "Version history" UI instead.
+    Downloads the raw bytes of the specified revision and re-uploads them as
+    the file's current content. This creates a NEW revision identical to the
+    old one (it does not rewind the revision history — older revisions remain
+    accessible). Original file ID, name, and sharing permissions are preserved.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/drive` (write).
+    Large files (>100 MB) may take several seconds due to download+upload cycle.
+
+    **Limitation**: Google-native files (Docs, Sheets, Slides — MIME type
+    `application/vnd.google-apps.*`) do NOT expose raw revision content via
+    the Drive API. Attempting to restore a native file returns an explanatory
+    error. For those, open the file in Google Docs/Sheets/Slides and use the
+    built-in "Version history" UI (File > Version history > See version history).
+    Binary-content files (PDFs, DOCX, XLSX, images, ZIP, etc.) are fully
+    supported.
 
     Args:
-        file_id: Drive file ID.
-        revision_id: ID of the revision to restore (from get_drive_revisions).
+        file_id: Drive file ID (from a file URL like
+            `drive.google.com/file/d/<file_id>/view`, or from
+            `search_drive_files`). File must be a non-Google-native type.
+        revision_id: ID of the revision to restore TO. Get it from
+            `get_drive_revisions` — the `id` field on each revision entry.
+            The revision must still be retained (pinned with `keepForever` OR
+            within Drive's normal retention window).
+
+    Returns:
+        On success: "Restored file '<name>' (<id>) to revision '<revisionId>'.
+        New version: <N>, modified: <ISO8601>." where `<N>` is the new version
+        number assigned by Drive after the restore.
+        On Google-native file: "Cannot restore revision for Google-native file
+        '<name>' (mime: <mimeType>). Use the Google Docs/Sheets/Slides Version
+        History UI for native files."
     """
     logger.info(f"[restore_drive_revision] file='{file_id}' rev='{revision_id}'")
 

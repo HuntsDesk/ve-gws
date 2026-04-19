@@ -2,6 +2,8 @@
 
 # VE Google Workspace MCP (ve-gws)
 
+[![ve-gws MCP server](https://glama.ai/mcp/servers/HuntsDesk/ve-gws/badges/score.svg)](https://glama.ai/mcp/servers/HuntsDesk/ve-gws) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/) [![Tests](https://img.shields.io/badge/tests-822%20passing-brightgreen.svg)](https://github.com/HuntsDesk/ve-gws)
+
 Most Google Workspace MCPs let you read. This one lets you write — a Python fork of [`taylorwilsdon/google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) with **28 additional authoring tools** on top (deeper Slides, markdown-to-Docs, smart chips, Sheets data validation, recursive Drive copy, revisions). See [Why VE-GWS (vs. upstream)](#why-ve-gws-vs-upstream) below.
 
 > **Part of [Vibe Entrepreneurs](https://vibeentrepreneurs.com)** — a community for any vibe coders shipping real work with AI: solo indie builders, product-minded devs, agency folks, side-project makers. You don't need to use ve-gws to join. Come say hi: **[vibeentrepreneurs.com](https://vibeentrepreneurs.com)**.

@@ -2581,14 +2581,32 @@ async def list_doc_tabs(
     document_id: str,
 ) -> str:
     """
-    List all tabs in a Google Doc, including nested child tabs.
+    List all tabs in a Google Doc, including nested child tabs, as a flat tree.
 
-    Returns a flattened hierarchy with tab IDs, titles, index positions, and
-    nesting depth. Useful as a prerequisite for any tool that takes a `tab_id`
-    parameter (insert_doc_markdown, insert_doc_link, modify_doc_text, etc.).
+    Google Docs tabs (launched Oct 2024) let a single document contain multiple
+    sub-documents organized hierarchically. Most doc-editing tools need a
+    `tab_id` to target a specific tab — call this first to discover IDs,
+    titles, and the tab hierarchy. Returned tabs preserve document order;
+    indentation in the output indicates nesting depth (child tabs shown under
+    their parent).
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/documents.readonly`
+    (or broader). Read-only.
 
     Args:
-        document_id: ID of the document.
+        document_id: Google Docs document ID (from the URL after `/document/d/`).
+
+    Returns:
+        Multi-line string. First line: "Found <N> tab(s) in document <id>:".
+        Each subsequent line: indentation (2 spaces per nesting level) +
+        `- [<index>] "<title>" (tabId: <tab_id>)`. For legacy single-body
+        documents (no tabs structure): "Document <id> has no tabs (legacy
+        single-body document)." — treat this as "pass `tab_id=None` to
+        doc-editing tools".
+
+    Common usage: call before `insert_doc_markdown`, `insert_doc_link`,
+    `modify_doc_text`, `insert_doc_elements`, etc., to resolve which `tab_id`
+    to target. Save the output and pass the matching ID into subsequent calls.
     """
     logger.info(f"[list_doc_tabs] Doc={document_id}")
 
@@ -2757,16 +2775,40 @@ async def insert_doc_person_chip(
     tab_id: Optional[str] = None,
 ) -> str:
     """
-    Insert an @mention person chip at a specified index.
+    Insert an @mention-style person chip at a specific position in a document.
 
-    The person's email is inserted as text with a `mailto:` link; Google Docs
-    auto-converts this into a rich person chip when rendering.
+    Writes the person's email as linked text (href = `mailto:<email>`). When
+    Google Docs renders the document, that linked-email pattern is
+    auto-converted into a rich person chip — a small inline pill showing the
+    person's name, avatar, and hover card. The chip is a "smart chip" and
+    shows up in `get_doc_smart_chips` as type `person`.
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/documents` (write).
+    For a Drive-file chip instead, use `insert_doc_file_chip`. For a plain
+    hyperlink, use `insert_doc_link`.
+
+    **Note**: The chip only renders correctly once a collaborator or the owner
+    opens the doc in the Google Docs UI — Docs does the text-to-chip
+    conversion client-side on render. The API always stores the raw linked
+    email. Person resolution uses the email only; if the email doesn't match
+    a Google account visible to the viewer, it falls back to plain linked text.
 
     Args:
-        document_id: ID of the document.
-        email: Email address of the person to mention.
-        index: Document index at which to insert.
-        tab_id: Optional tab ID to scope the insertion to.
+        document_id: Google Docs document ID (from the URL after `/document/d/`).
+        email: Email address of the person to @mention, e.g., `alice@example.com`.
+            Must be a valid email; the Docs client uses it to look up the
+            contact card at render time.
+        index: 1-based character position in the document body where the chip
+            is inserted. Default `1` = start of body. Use
+            `inspect_doc_structure` to find exact indices for non-trivial
+            placements. Ignored contextually when `tab_id` is set — index
+            resolves within the specified tab's content.
+        tab_id: Optional tab ID to target a specific tab. Get it from
+            `list_doc_tabs`. Omit for single-body (legacy) documents.
+
+    Returns:
+        Summary string: "Inserted person chip for <email> at index <index> in
+        document <id>."
     """
     logger.info(
         f"[insert_doc_person_chip] Doc={document_id}, email={email}, index={index}"
@@ -2870,12 +2912,34 @@ async def get_doc_smart_chips(
     document_id: str,
 ) -> str:
     """
-    Extract all smart chips (person mentions, file/rich links) from a document.
+    Extract every smart chip in a Google Doc — person mentions and rich links.
 
-    Walks the document body and returns each chip's type, position, and properties.
+    Walks the document body, finds all `person` and `richLink` inline elements,
+    and returns their type, character range, and key properties. Useful for
+    auditing @mentions (who is referenced where), validating links to external
+    resources, or building a chip inventory before batch-editing. Does NOT
+    include inline hyperlinks that never upgraded to chips (use a direct text
+    scan for those).
+
+    Requires OAuth scope: `https://www.googleapis.com/auth/documents.readonly`
+    (or broader). Read-only — safe to call repeatedly.
+
+    **Scope note**: This inspects the main document body only. Chips inside
+    headers, footers, footnotes, or secondary tabs are not returned. Only
+    chips that have been rendered/saved by the Docs client appear here —
+    chips inserted programmatically via `insert_doc_person_chip` or
+    `insert_doc_file_chip` won't show up in this result until a user opens
+    the doc in the Docs UI and Docs upgrades the raw linked text into a chip.
 
     Args:
-        document_id: ID of the document.
+        document_id: Google Docs document ID (from the URL after `/document/d/`).
+
+    Returns:
+        Multi-line string. First line: "Found <N> smart chip(s) in document
+        <id>:" (or "No smart chips found in document <id>." if empty). Each
+        subsequent line is numbered and describes one chip:
+        - Person: `"  <n>. [person] @<email or name> (range <start>-<end>)"`.
+        - Rich link: `"  <n>. [link] <title or (untitled)> — <uri> (range <start>-<end>)"`.
     """
     logger.info(f"[get_doc_smart_chips] Doc={document_id}")
 
